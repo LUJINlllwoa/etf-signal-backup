@@ -21,7 +21,7 @@ TIMEOUT = 10
 
 DEFAULT_CONFIG = {
     'ntfy': {'server': 'https://ntfy.sh', 'topic': '', 'priority': 4, 'tags': []},
-    'wxpusher': {'spt': ''},
+    'wxpusher': {'spt': '', 'spt_list': []},
     'serverchan': {'sendkey': ''},
     'pushplus': {'token': ''},
 }
@@ -125,23 +125,38 @@ def _send_wxpusher(cfg, title, message, html=None, url=None):
     传 url 则点消息可跳转（支持自定义 URL Scheme 拉起看板自动复制代码）。
     """
     c = cfg.get('wxpusher') or {}
-    spt = (c.get('spt') or '').strip()
-    if not spt:
+    # 收集所有接收人 SPT：兼容旧的单个 spt，加上 spt_list（去重、去空）
+    spts = []
+    for x in [c.get('spt', '')] + list(c.get('spt_list') or []):
+        x = (x or '').strip()
+        if x and x not in spts:
+            spts.append(x)
+    if not spts:
         return {'ok': False, 'skip': True, 'detail': '未配置 WxPusher spt'}
-    body = {
-        'spt': spt,
+    body_common = {
         'summary': title,
         'content': html if html else message,
         'contentType': 2 if html else 1,
     }
     if url:
-        body['url'] = url
-    data = json.dumps(body, ensure_ascii=False).encode('utf-8')
-    txt = _http('https://wxpusher.zjiecode.com/api/send/message/simple-push',
-                data=data, headers={'Content-Type': 'application/json'})
-    d = json.loads(txt)
-    ok = d.get('code') == 1000
-    return {'ok': ok, 'detail': 'WxPusher code=%s %s' % (d.get('code'), d.get('msg', ''))}
+        body_common['url'] = url
+    results = []
+    ok_all = True
+    for spt in spts:
+        body = dict(body_common)
+        body['spt'] = spt
+        data = json.dumps(body, ensure_ascii=False).encode('utf-8')
+        try:
+            txt = _http('https://wxpusher.zjiecode.com/api/send/message/simple-push',
+                        data=data, headers={'Content-Type': 'application/json'})
+            dd = json.loads(txt)
+            ok = dd.get('code') == 1000
+            ok_all = ok_all and ok
+            results.append('%s:%s' % (spt[:8], dd.get('msg', '')))
+        except Exception as e:
+            ok_all = False
+            results.append('%s:异常 %s' % (spt[:8], e))
+    return {'ok': ok_all, 'detail': 'WxPusher 共%d人 %s' % (len(spts), '；'.join(results))}
 
 
 def push(title, message, tags=None, html=None, url=None, click=None):
@@ -175,7 +190,8 @@ def configured_channels():
     ch = []
     if (cfg.get('ntfy') or {}).get('topic'):
         ch.append('ntfy')
-    if (cfg.get('wxpusher') or {}).get('spt'):
+    _w = cfg.get('wxpusher') or {}
+    if _w.get('spt') or _w.get('spt_list'):
         ch.append('wxpusher')
     if (cfg.get('serverchan') or {}).get('sendkey'):
         ch.append('serverchan')

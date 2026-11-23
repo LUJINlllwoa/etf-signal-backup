@@ -59,5 +59,21 @@
   "day_saved": 191,
   "dir_bytes": 6583652,
   "archived_at": "2026-11-20 16:38:50"
+ },
+ {
+  "date": "2026-11-23",
+  "ymd": "20261123",
+  "pool_total": 221,
+  "active": 216,
+  "zombie_skip": 5,
+  "quote_ok": 216,
+  "quote_fail": 0,
+  "minute_saved": 216,
+  "m5_saved": 216,
+  "m1_saved": 216,
+  "auction_saved": 216,
+  "day_saved": 216,
+  "dir_bytes": 7230467,
+  "archived_at": "2026-11-23 16:35:38"
  }
 ]
