@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>正在打开同花顺</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 36px 24px; text-align: center; font-size: 20px; line-height: 1.6; }
+  .btn { background: #2563EB; color: #fff; border: none; border-radius: 12px;
+         padding: 16px 30px; font-size: 20px; margin-top: 26px; }
+  .tip { color: #555; font-size: 17px; }
+</style>
+</head>
+<body>
+  <p>正在打开同花顺…</p>
+  <p class="tip">如果没有自动跳转，请点下面按钮</p>
+  <button class="btn" onclick="go()">打开同花顺 159696</button>
+  <script>
+    var deep = 'hketf://signal?code=159696';
+    function go() { window.location.href = deep; }
+    window.onload = function () { setTimeout(go, 300); };
+  </script>
+</body>
+</html>

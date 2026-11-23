@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.log
+signal_state.json
+.gh_token
+supervisor.sock
+supervisord.pid
+*.idsig

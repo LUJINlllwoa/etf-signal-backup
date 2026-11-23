@@ -1,0 +1,16 @@
+{
+ "date": "2026-11-20",
+ "ymd": "20261120",
+ "pool_total": 196,
+ "active": 191,
+ "zombie_skip": 5,
+ "quote_ok": 191,
+ "quote_fail": 0,
+ "minute_saved": 191,
+ "m5_saved": 191,
+ "m1_saved": 191,
+ "auction_saved": 188,
+ "day_saved": 191,
+ "dir_bytes": 6583652,
+ "archived_at": "2026-11-20 16:38:50"
+}
