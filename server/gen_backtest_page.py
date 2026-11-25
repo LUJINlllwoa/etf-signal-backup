@@ -20,9 +20,29 @@ def pct(v, signed=True):
     return ('%+.2f%%' % v) if signed else ('%.2f%%' % v)
 
 
+def r_agg(rs):
+    n = len(rs)
+    if not n:
+        return None
+    hi = sum(r['hit_hi'] for r in rs)
+    lo = sum(r['hit_lo'] for r in rs)
+    mg = [r['max_gain'] for r in rs]
+    cg = [r['close_gain'] for r in rs]
+    dd = [r['max_dd'] for r in rs]
+    cg_win = [x for x in cg if x > 0.05]
+    cg_lose = [x for x in cg if x <= -0.05]
+    return {'n': n, 'hi_rate': round(hi / n * 100, 1), 'lo_rate': round(lo / n * 100, 1),
+            'mg_avg': round(sum(mg) / n, 2), 'mg_med': round(sorted(mg)[n // 2], 2),
+            'cg_avg': round(sum(cg) / n, 2), 'dd_avg': round(sum(dd) / n, 2),
+            'stop_rate': round(sum(r['stop_first'] for r in rs) / n * 100, 1),
+            'cg_neg': round(sum(1 for x in cg if x <= -0.05) / n * 100, 1),
+            'pl_ratio': round(sum(cg_win) / len(cg_win) / abs(sum(cg_lose) / len(cg_lose)), 2) if cg_win and cg_lose else None}
+
+
 def main():
     rv = json.load(open(os.path.join(BT, 'backtest_review.json'), encoding='utf-8'))
     tr = json.load(open(os.path.join(BT, 'trajectory_20261125.json'), encoding='utf-8'))
+    rep = json.load(open(os.path.join(BT, 'replay_records.json'), encoding='utf-8'))
     tot = rv['total']
     kinds = ['早盘', '下午', '反转', '二次探底', '美股']
 
@@ -76,13 +96,39 @@ def main():
             f'<td style="color:{c(a["cg_avg"])}">{pct(a["cg_avg"])}</td>'
             f'<td>{a["pull_avg"]}%</td><td>{pl}</td></tr>')
 
+    # 6 天全量形态回放
+    rep_n = len(rep)
+    rep_kind_rows = ''
+    for k in kinds:
+        a = r_agg([r for r in rep if r['kind'] == k])
+        if not a:
+            continue
+        pl = a['pl_ratio'] if a['pl_ratio'] is not None else '—'
+        rep_kind_rows += (
+            f'<tr><td><b>{k}</b></td><td>{a["n"]}</td>'
+            f'<td>{a["hi_rate"]}%</td><td>{a["lo_rate"]}%</td>'
+            f'<td style="color:{c(a["mg_avg"])}">{pct(a["mg_avg"])}</td>'
+            f'<td style="color:{c(a["cg_avg"])}">{pct(a["cg_avg"])}</td>'
+            f'<td style="color:{c(a["dd_avg"])}">{pct(a["dd_avg"])}</td>'
+            f'<td>{a["stop_rate"]}%</td><td>{a["cg_neg"]}%</td><td>{pl}</td></tr>')
+    take_rows = ''
+    for tgt in [0.2, 0.3, 0.45, 0.65, 0.8]:
+        reach = sum(1 for r in rep if r['max_gain'] >= tgt)
+        take_rows += f'<tr><td>+{tgt}%</td><td>{reach}/{rep_n}</td><td>{reach/rep_n*100:.1f}%</td></tr>'
+    stop_rows = ''
+    for stp in [0.25, 0.4, 0.6, 1.0]:
+        brk = sum(1 for r in rep if r['max_dd'] <= -stp)
+        stop_rows += f'<tr><td>−{stp}%</td><td>{brk}/{rep_n}</td><td>{brk/rep_n*100:.1f}%</td></tr>'
+
     advices = [
         ('二次探底模式：建议暂停或大幅收紧', '4 天 5 只 0 达标、收盘全负 −2.16%；今日 5 只 100% 达标前先破止损。样本虽小但方向一致，先关推送观察，不要继续接飞刀。'),
         ('下午单：收紧进场门槛', '56 只里 41% 摸不到 0.2%；今日 81% 达标前先破止损、平均回撤 −2.85% 最深。假突破偏多，可上调量比/红率门槛，弱市日直接不发下午单。'),
         ('止盈偏快，不拿尾盘', '整体平均回吐 1.42%，今日达标后平均回吐 2.71%；最高能赚中位仅 0.37%，收盘中位 −0.46%。触保底/主目标分批落袋，尾盘前走，早盘/下午/反转别拿到收盘。'),
         ('弱市环境过滤要加强', '11-23 强市收盘 +0.52%、盈亏比 2.78；11-25 弱市 −2.00%、97.9% 收盘负。策略高度依赖大盘，弱市（恒生/恒科跌≥1%）应整体降仓、减少开档单；暴跌 −3% 熔断保留。'),
         ('反转（坑反弹）：摸到就走别贪', '达标率 85.7% 最高，但收盘盈亏比 0.38、回吐 1.3%~1.38%。反弹到目标就落袋，不追求拿住。'),
-        ('美股池：相对最抗跌，保留', '平均收盘 −0.12%、触发后回撤最浅，可作为相对主力池；白天闭市只做溢价、快进快出口径不变。'),
+        ('美股池：相对最抗跌，保留', '台账平均收盘 −0.12%、回放盈亏比 2.16、触发后回撤 −0.60% 最浅，可作为相对主力池；白天闭市只做溢价、快进快出口径不变。'),
+        ('止损位评估放宽，别被插针扫出', '全量回放里 86.1% 的单盘中最低会下探破 −0.25%，78.6% 破 −0.4%；现早盘/下午止损 0.25% 偏紧，容易被上下影插针洗出。可评估放宽到 −0.4%，或改成“下一根收盘站稳破位”再止损，而非盘中一碰就走。'),
+        ('早盘单：形态期望偏弱，建议收紧', '回放早盘 134 笔平均收盘 −1.29%、回撤 −2.17% 最深、80.6% 收盘负，形态期望在五类里最弱；可上调早盘实体/量比门槛，或降低早盘仓位，弱市日少开早盘单。'),
     ]
     adv_html = ''
     for i, (t, d) in enumerate(advices, 1):
@@ -111,7 +157,7 @@ td:first-child,th:first-child{{text-align:left;}}
 .note{{font-size:12px;color:{GREY};line-height:1.7;margin-top:10px;}}
 </style></head><body>
 <h1>策略回测复盘</h1>
-<div class="sub">2026-11-25 · 4 天 130 只已确认信号 + 今日 47 只逐分钟轨迹</div>
+<div class="sub">2026-11-25 · 4 天 130 只已确认信号 + 今日 47 只轨迹 + 6 天全量回放 {rep_n} 笔</div>
 
 <div class="section">
 <div class="st">整体总览（4 天合计）</div>
@@ -147,11 +193,31 @@ td:first-child,th:first-child{{text-align:left;}}
 </div>
 
 <div class="section">
+<div class="st">6 天全量形态回放（宽松口径 {rep_n} 笔）</div>
+<table><tr><th>类型</th><th>样本</th><th>主目标</th><th>保底</th><th>平均最高</th><th>平均收盘</th><th>平均回撤</th><th>先破止损</th><th>收盘负</th><th>盈亏比</th></tr>
+{rep_kind_rows}</table>
+<div class="note">回放只复刻价格/实体/量能/坑底/W底形态，未过成分红率、加权、美股溢价与大盘闸门，样本被放大，绝对胜率不等于实盘，仅看形态方向。</div>
+</div>
+
+<div class="section">
+<div class="st">止盈档 · 触发后最高触达率</div>
+<table><tr><th>目标</th><th>触达</th><th>比例</th></tr>
+{take_rows}</table>
+</div>
+
+<div class="section">
+<div class="st">止损档 · 触发后盘中最低跌破率</div>
+<table><tr><th>止损</th><th>跌破</th><th>比例</th></tr>
+{stop_rows}</table>
+<div class="note">跌破按盘中最低价（含插针）统计；实盘按收盘站稳判定会更宽松。</div>
+</div>
+
+<div class="section">
 <div class="st">优化建议（按证据强弱）</div>
 {adv_html}
 </div>
 
-<div class="note">局限：样本仅 4 天 130 只；11-23/11-24 最高能赚为旧口径（含触发前高点），偏乐观；二次探底仅 5 只；今日为弱市日，轨迹止损比例不能外推为常态。建议再积累 1~2 周数据复核后再动参数。</div>
+<div class="note">局限：台账样本仅 4 天 130 只；11-23/11-24 最高能赚为旧口径（含触发前高点），偏乐观；二次探底仅 5 只；今日为弱市日。全量回放未过红率/加权/溢价/大盘闸门，形态样本被放大，止损跌破率含插针。建议再积累 1~2 周数据复核后再动参数。</div>
 </body></html>'''
     open(OUT, 'w', encoding='utf-8').write(html)
     print('DELIVER:' + OUT)
