@@ -187,6 +187,7 @@ def update_hitrate(date, rows):
 def build_push_html(rows, day_doc, cum):
     name_map = dict(sp.HK_ETF_LIST)
     name_map.update(dict(sp.US_ETF))
+    name_map.update(dict(sp.COMMODITY_FUT))
 
     def pf(v):
         if v is None:
@@ -232,6 +233,7 @@ def build_review_html(date, rows, day_doc, cum):
     """手机端信号利润复盘页：当天全部实际信号逐只利润 + 分类汇总 + 跨天累计。"""
     name_map = dict(sp.HK_ETF_LIST)
     name_map.update(dict(sp.US_ETF))
+    name_map.update(dict(sp.COMMODITY_FUT))
     BLUE, RED, GREEN, GREY = '#2563EB', '#EA6668', '#059669', '#6B7280'
     KIND_ORDER = ['早盘', '下午', '反转', '二次探底', '美股']
 
