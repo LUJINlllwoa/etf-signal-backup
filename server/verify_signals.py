@@ -111,6 +111,10 @@ def verify_one(sig, day, m1_bars=None):
         tgt_lo = tgt_hi = None
     out.update(tgt_lo=tgt_lo, tgt_hi=tgt_hi)
     raw_high = high
+    # 只取触发（确认）时刻及之后的1分K：触发前的冲高不计入触发后利润，
+    # 否则会把早盘/上午的高点错算成本次信号能吃到的空间。
+    if m1_bars and sig.get('confirm_bt'):
+        m1_bars = [b for b in m1_bars if b[0] >= sig['confirm_bt']]
     # 真实站稳价：有1分K用收盘价最高（挤掉插针），取不到1分K回退日K最高
     if m1_bars:
         real_high = max(float(b[2]) for b in m1_bars)
