@@ -216,14 +216,32 @@ def build_push_html(rows, day_doc, cum):
             r['trig_price'], r['real_high'], r['day']['close'],
             mg_c, mg_txt, cg_c, cg_txt)
     body = ''.join(line(r) for r in rows) or '<div>当天没有发出信号</div>'
-    if cum and cum.get('n_signal'):
-        foot = ('<div style="margin-top:12px;padding:10px;background:#f0f5ff;border-radius:8px;'
-                'font-size:15px;">累计 %d 个信号：主目标达成率 <b>%s%%</b>，'
-                '保底达成率 <b>%s%%</b>，平均收盘 %+.2f%%</div>') % (
-            cum['n_signal'], cum['hit_hi_rate'], cum['hit_lo_rate'],
-            cum['close_gain_avg'] or 0)
+    n_today = len(rows)
+    foot = ''
+    if n_today:
+        hi_t = sum(1 for r in rows if r['result'] == '吃到主目标')
+        lo_t = sum(1 for r in rows if r.get('hit_lo'))
+        cg = [r['close_gain'] for r in rows if r.get('close_gain') is not None]
+        cg_avg_t = round(sum(cg) / len(cg), 2) if cg else None
+        cg_txt_t, cg_c_t = pf(cg_avg_t)
+        today_line = ('<div style="font-size:15px;margin-bottom:6px;">今日 <b>%d</b> 只：'
+                      '主目标 <b>%d（%.1f%%）</b>、保底 <b>%d（%.1f%%）</b>、'
+                      '平均收盘 <span style="color:%s;">%s</span></div>') % (
+            n_today, hi_t, hi_t / n_today * 100, lo_t, lo_t / n_today * 100,
+            cg_c_t, cg_txt_t)
     else:
-        foot = ''
+        today_line = ''
+    if cum and cum.get('n_signal'):
+        cum_cg = cum['close_gain_avg'] or 0
+        cum_c = '#EA6668' if cum_cg >= 0.05 else ('#059669' if cum_cg <= -0.05 else '#6B7280')
+        cum_line = ('<div style="font-size:13px;color:#6B7280;">累计 %d 只：主目标 <b>%.1f%%</b>、'
+                    '保底 <b>%.1f%%</b>、平均收盘 <span style="color:%s;">%+.2f%%</span></div>') % (
+            cum['n_signal'], cum['hit_hi_rate'], cum['hit_lo_rate'], cum_c, cum_cg)
+        foot = ('<div style="margin-top:12px;padding:10px;background:#f0f5ff;border-radius:8px;">'
+                '%s%s</div>') % (today_line, cum_line)
+    elif today_line:
+        foot = ('<div style="margin-top:12px;padding:10px;background:#f0f5ff;border-radius:8px;">'
+                '%s</div>') % today_line
     return ('<div style="font-size:16px;line-height:1.6;color:#1f2937;">'
             '<div style="font-size:18px;font-weight:600;margin-bottom:8px;">'
             '信号核对 %s</div>%s%s</div>') % (day_doc['date'], body, foot)
