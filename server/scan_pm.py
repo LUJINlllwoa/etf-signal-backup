@@ -108,6 +108,19 @@ REV_RED_MIN = 0.4      # 成分股红率门槛（顺势为 0.6）
 REV_W_NORMAL = 0.0     # 正常市：成分加权 w 需为正
 REV_W_WEAK = -0.5      # 弱市：允许成分股小跌，但不能深度暴跌（防接飞刀）
 
+# —— 二次探底再拉起（第一波冲高后回踩、W底企稳，捕捉坑底拉起那一段）——
+SB_FIRST_PUSH = 1.0     # 第一波冲高最小涨幅%（相对开盘），确认是有力度的真拉升
+SB_PULLBACK_GAP = 8     # 第一波高点距当前至少多少根，确认已经历回踩而非正在冲高
+SB_NECK_MIN = 0.3       # 两底之间中间反弹的最小幅度%，确认是W底而非单底/下跌中继
+SB_PIT_TOL = 0.1        # 第二底相对第一底允许的破位容差%，超过视为破位不接
+SB_BODY_MIN = 0.15      # 拉起触发根最小实体阳线%
+SB_RV_MIN = 1.5         # 拉起触发根量比门槛，要真放量
+SB_LIFT_MIN = 0.1       # 触发根收盘相对坑底最小抬升%
+SB_LIFT_MAX = 0.7       # 触发根收盘相对坑底最大抬升%，超过说明已涨高、不追
+SB_PB_KEEP = 0.2        # 回踩最多吐回第一波涨幅的(1-该值)，至少保留该比例，维持上升结构
+SB_TAKE = 0.65          # 目标 +0.65%
+SB_STOP = 0.4           # 止损 -0.4%
+
 # —— 大盘环境开关（弱市自动踩刹车）——
 INDEX_CODES = ['r_hkHSI', 'r_hkHSTECH']  # 恒生指数、恒生科技
 INDEX_WEAK_PCT = -1.0   # 任一指数跌幅达到/超过 1% 即判弱市
@@ -491,6 +504,88 @@ def reversal_metrics(qt, bars):
     return None
 
 
+def second_bottom_metrics(qt, bars):
+    """二次探底再拉起：第一波冲高后回踩，出现两次探底、第二底不破前低（企稳），
+    再放量阳线拉起时触发。返回与 gate_eval 兼容的 cand dict，否则 None。
+
+    与 reversal_metrics 的区别：反转只认开盘价下方、9:35-9:45 的深坑贴底；
+    本函数覆盖盘中（含开盘价上方的浅坑）回踩双底后的拉起，不要求创新高。
+    """
+    if not qt or not bars or len(bars) < 20:
+        return None
+    open_px = qt.get('open')
+    now_px = qt.get('now')
+    if not open_px or open_px <= 0 or now_px is None:
+        return None
+    # 1) 第一波冲高：当日已有相对开盘达标的高点，且高点不在最近几根（已回踩）
+    highs = [float(b[3]) for b in bars]
+    hi_val = max(highs)
+    hi_idx = highs.index(hi_val)
+    if (hi_val / open_px - 1) * 100 < SB_FIRST_PUSH:
+        return None                        # 没有像样的第一波拉升
+    if hi_idx > len(bars) - SB_PULLBACK_GAP:
+        return None                        # 高点太近，还没经历回踩
+    # 2) W底识别：第一底＝第一波高点之后的主低点；中间须有一次明显反弹；
+    #    第二底＝反弹高点之后的次低点，且不低于第一底（底部抬高）
+    seg = [(hi_idx + j, float(bars[hi_idx + j][4]))
+           for j in range(len(bars) - hi_idx)]
+    pit1 = min(v for _, v in seg)
+    pit1_i = next(i for i, v in seg if v == pit1)
+    if pit1_i >= len(bars) - 2:
+        return None
+    # 中间反弹高点（第一底之后的最高 high）
+    neck = max(float(bars[i][3]) for i in range(pit1_i + 1, len(bars)))
+    neck_i = next(i for i in range(pit1_i + 1, len(bars))
+                  if float(bars[i][3]) == neck)
+    if (neck / pit1 - 1) * 100 < SB_NECK_MIN:
+        return None                        # 中间没有像样反弹，不构成W底
+    p2seg = [(i, float(bars[i][4])) for i in range(neck_i + 1, len(bars))]
+    if not p2seg:
+        return None
+    pit2 = min(v for _, v in p2seg)
+    pit2_i = next(i for i, v in p2seg if v == pit2)
+    # 第二底不破第一底（容差内）；pit2 明显低于 pit1 视为破位，不接
+    if (pit1 / pit2 - 1) * 100 > SB_PIT_TOL:
+        return None
+    # 回踩不能把第一波涨幅全吐回去：第二底至少保留第一波涨幅的 SB_PB_KEEP，维持上升结构
+    first_push_pct = (hi_val / open_px - 1) * 100
+    pit2_pct = (pit2 / open_px - 1) * 100
+    if pit2_pct < first_push_pct * SB_PB_KEEP:
+        return None
+    # 3) 最近窗口内、第二底之后的放量阳线拉起
+    vols = [float(b[5] or 0) for b in bars]
+    start_i = max(0, len(bars) - TRIGGER_LOOKBACK)
+    for i in range(len(bars) - 1, start_i - 1, -1):
+        b = bars[i]
+        try:
+            o, c = float(b[1]), float(b[2])
+        except Exception:
+            continue
+        if o <= 0 or c <= 0:
+            continue
+        if i <= pit2_i:
+            continue                       # 触发根必须在第二底之后
+        body = (c / o - 1) * 100
+        if body < SB_BODY_MIN:
+            continue
+        if vols[i] <= 0:
+            continue
+        rv = bar_rv(vols, i)
+        if rv is not None and rv < SB_RV_MIN:
+            continue
+        lift = (c / pit2 - 1) * 100        # 收盘相对坑底抬升
+        if not (SB_LIFT_MIN <= lift <= SB_LIFT_MAX):
+            continue
+        gap = qt.get('gap')
+        score = (rv or 1) + body
+        return {'lift': round((c / open_px - 1) * 100, 3), 'lb': b,
+                'rv': round(rv, 2) if rv is not None else None,
+                'body': round(body, 2), 'gap': gap,
+                'low': gap is not None and gap < 0,
+                'score': round(score, 3)}
+    return None
+
+
 def comp_metrics(code):
     """成分股：红率(按个数) + 加权 w（对齐 compOpenRedRate / compOpenAvg）。
     完全取不到数据(n=0)属网络抖动，内部重试一次，避免误判 fail。"""
@@ -604,9 +699,9 @@ def us_premium_metrics(code, now_px, live=None):
 
 
 def load_state():
-    default = {'date': TODAY, 'am': {}, 'pm': {}, 'rev': {}, 'us': {},
+    default = {'date': TODAY, 'am': {}, 'pm': {}, 'rev': {}, 'us': {}, 'sb': {},
                'fired_am': [], 'fired_pm': [], 'fired_rev': [], 'fired_us': [],
-               'fired_lowup': [],
+               'fired_sb': [], 'fired_lowup': [],
                'position': {},
                'market': {'state': 'normal', 'hsi': None, 'hstech': None}}
     try:
@@ -681,6 +776,8 @@ def gate_eval(states, code, cand, bars, qt, require_red, is_rev=False):
     stand = now_price is not None and now_price >= st['trig_price']
 
     red_ok = w_ready = w_gate = True
+    cm = None  # 成分指标，美股分支用 um，先初始化避免失败文案引用未定义变量
+    um = None
     if require_red:
         if code in US_CODES:
             # 美股QDII：白天美股闭市、无成分股实时红率，用溢价安全门确认（实时净值）
@@ -738,8 +835,12 @@ def gate_eval(states, code, cand, bars, qt, require_red, is_rev=False):
         if has_next and require_red and not (red_ok and w_ready and w_gate):
             st['phase'] = 'fail'
             if not red_ok:
-                st['why'] = ('红率不足(%.0f%%)' % (cm['red_rate'] * 100)
-                             if cm and cm['red_rate'] is not None else '成分加权未就绪')
+                if code in US_CODES:
+                    st['why'] = '溢价安全门未通过'
+                elif cm and cm['red_rate'] is not None:
+                    st['why'] = '红率不足(%.0f%%)' % (cm['red_rate'] * 100)
+                else:
+                    st['why'] = '成分加权未就绪'
             elif cm and cm['w'] is not None:
                 st['why'] = '成分共振不足(w=%.2f)' % cm['w']
             else:
@@ -908,7 +1009,8 @@ def push_pm(doc, quotes, states):
         print('暴跌硬熔断，下午信号全部暂停（不新开，等大盘企稳）')
         doc['fired_pm'] = sorted(set(doc['fired_pm']))
         return []
-    fired = set(doc['fired_pm'])
+    # 当日已推过的票（含早盘）不重复推，避免覆盖早盘持仓记录；仅破止损后的合法重进例外
+    fired = set(doc['fired_pm']) | set(doc.get('fired_am', []))
     new = []
     for code, s in states.items():
         if s.get('phase') != 'confirm':
@@ -951,7 +1053,7 @@ def push_pm(doc, quotes, states):
             rec['reentry_seen'] = s['reentry_count']  # 标记本次重启已推，避免重复
         doc.setdefault('position', {})[code] = rec
         new.append({'code': code, 'kind': '下午', 'trig_price': s['trig_price'],
-                    'red_rate': s.get('red'), 'confirm_bt': s.get('confirm_bt')})
+                    'red_rate': s.get('red_rate'), 'confirm_bt': s.get('confirm_bt')})
     doc['fired_pm'] = sorted(fired)
     return new
 
@@ -1012,6 +1114,55 @@ def push_rev(doc, quotes, states):
     doc['fired_rev'] = sorted(fired)
     return [{'code': code, 'kind': '反转', 'trig_price': trig,
              'red_rate': s.get('red_rate'), 'confirm_bt': s.get('confirm_bt')}]
+
+
+def push_sb(doc, quotes, states):
+    """二次探底再拉起：confirm 后推送，目标 +0.65%、止损 -0.4%。
+    暴跌硬熔断全停；已被其他类型推过的票不重复推。"""
+    if is_crash():
+        print('暴跌硬熔断，二次探底信号暂停（不接飞刀）')
+        doc['fired_sb'] = sorted(set(doc.get('fired_sb', [])))
+        return []
+    if is_weak():
+        # 回测：普跌环境 W 底达标率仅 3.8%、止损率 92%，弱市默认不推，避免在下跌中继接飞刀
+        print('弱市二次探底默认不推（回测普跌日达标率仅3.8%%）@%d' % now_min())
+        doc['fired_sb'] = sorted(set(doc.get('fired_sb', [])))
+        return []
+    already = (set(doc['fired_am']) | set(doc['fired_pm'])
+               | set(doc['fired_rev']) | set(doc['fired_us']))
+    fired = set(doc.get('fired_sb', []))
+    new = []
+    for code, s in states.items():
+        if s.get('phase') != 'confirm' or code in fired or code in already:
+            continue
+        qt = quotes.get(code)
+        lv = entry_levels(s, qt, SB_TAKE, SB_STOP)
+        if lv is None:
+            # 现价已涨完目标空间，追高放弃，当天锁定
+            s['phase'] = 'chase'
+            print('追高放弃 %s（二次探底拉起空间不足）@%d' % (code, now_min()))
+            continue
+        trig_px, take_px, stop_px = lv['trig'], lv['target'], lv['stop']
+        title = '二次探底信号·%s' % (qt['name'] if qt else code)
+        msg = ('%s %s（二次探底再拉起）\n买入参考价 %.3f（触发价，收到赶紧下单）\n'
+               '对开盘 %s  红率 %s  现价 %s\n'
+               '双底企稳拉起：到 %s（+0.65%%）就走\n跌破 %s（-0.4%%）立刻止损，不恋战') % (
+            pure_code(code), qt['name'] if qt else code, trig_px,
+            ('%+.2f%%' % qt['rt_open']) if qt else '—',
+            ('%.0f%%' % (s['red_rate'] * 100)) if s.get('red_rate') is not None else '暂缺',
+            ('%.3f' % qt['now']) if qt else '—',
+            take_px, stop_px)
+        do_push(title, msg, code)
+        fired.add(code)
+        doc.setdefault('position', {})[code] = {
+            'kind': '二次探底', 'trig': s['trig_price'], 'entry': trig_px,
+            'trig_bt': s.get('trig_bt'),
+            'target': take_px,
+            'stop': stop_px, 'status': 'holding', 'miss_notified': False}
+        new.append({'code': code, 'kind': '二次探底', 'trig_price': s['trig_price'],
+                    'red_rate': s.get('red_rate'), 'confirm_bt': s.get('confirm_bt')})
+    doc['fired_sb'] = sorted(fired)
+    return new
 
 
 def push_us(doc, quotes, states):
@@ -1192,10 +1343,14 @@ def scan_once(force=False):
                    if quotes.get(c) and quotes[c].get('open') and quotes[c]['now'] < quotes[c]['open']]
     us_ready = [c for c in us_states if us_states[c].get('phase') == 'ready']
     us_watch = list(dict.fromkeys(us_codes_in + us_ready))
+    # 二次探底再拉起（独立状态 doc['sb']；不要求现价在开盘下方，覆盖浅坑双底）
+    sb_states = doc['sb']
+    sb_ready = [c for c in sb_states if sb_states[c].get('phase') == 'ready']
+    sb_watch = list(dict.fromkeys(codes + sb_ready))
 
     # 并发拉取本轮所需全部1分K（网络IO并行，把单轮从~85秒压到几秒），
     # 再串行做候选/闸门纯计算，配合触发即推实现秒级响应
-    all_kl = list(dict.fromkeys(watch + rev_watch + us_watch))
+    all_kl = list(dict.fromkeys(watch + rev_watch + us_watch + sb_watch))
     with ThreadPoolExecutor(max_workers=12) as ex:
         kl_cache = dict(zip(all_kl, ex.map(fetch_kline, all_kl)))
 
@@ -1219,11 +1374,25 @@ def scan_once(force=False):
         cand = reversal_metrics(qt, bars)
         gate_eval(us_states, code, cand, bars, qt, require_red=True, is_rev=True)
 
-    pushed = push_am_locked(doc, quotes, states) if is_am else push_pm(doc, quotes, states)
-    pushed += push_lowup_early(doc, quotes, codes)
-    pushed += push_rev(doc, quotes, rev_states)
-    pushed += push_us(doc, quotes, us_states)
-    track_positions(doc, quotes, t)
+    # 二次探底再拉起（独立状态；双底企稳放量后走红率门）
+    for code in sb_watch:
+        qt = quotes.get(code)
+        bars = kl_cache.get(code, [])
+        cand = second_bottom_metrics(qt, bars)
+        gate_eval(sb_states, code, cand, bars, qt, require_red=True, is_rev=False)
+
+    pushed = []
+    try:
+        pushed = push_am_locked(doc, quotes, states) if is_am else push_pm(doc, quotes, states)
+        pushed += push_lowup_early(doc, quotes, codes)
+        pushed += push_rev(doc, quotes, rev_states)
+        pushed += push_us(doc, quotes, us_states)
+        pushed += push_sb(doc, quotes, sb_states)
+        track_positions(doc, quotes, t)
+    except Exception as e:
+        # 单条推送/持仓分支异常不得阻断去重状态落盘，否则下一轮会重复推送同一只
+        print('推送分支异常（不阻断去重落盘）: %s' % e, flush=True)
+        pushed = pushed if isinstance(pushed, list) else []
     json.dump(doc, open('signal_state.json', 'w', encoding='utf-8'),
               ensure_ascii=False, indent=1)
     append_day_signals(pushed)
