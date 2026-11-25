@@ -86,7 +86,9 @@ def fetch_m1_day(code, date):
 
 def verify_one(sig, day, m1_bars=None):
     code, kind, trig = sig['code'], sig['kind'], float(sig['trig_price'])
-    out = {'code': code, 'kind': kind, 'trig_price': round(trig, 3), 'day': day}
+    confirm_ts = sig.get('confirm_bt')
+    time_txt = (confirm_ts[8:10] + ':' + confirm_ts[10:12]) if confirm_ts and len(confirm_ts) >= 12 else None
+    out = {'code': code, 'kind': kind, 'time': time_txt, 'trig_price': round(trig, 3), 'day': day}
     if not day:
         out.update(tgt_lo=None, tgt_hi=None, result='无数据', hit_lo=False, hit_hi=False,
                    max_gain=None, close_gain=None)
@@ -186,24 +188,32 @@ def build_push_html(rows, day_doc, cum):
     name_map = dict(sp.HK_ETF_LIST)
     name_map.update(dict(sp.US_ETF))
 
+    def pf(v):
+        if v is None:
+            return '—', '#6B7280'
+        c = '#EA6668' if v >= 0.05 else ('#059669' if v <= -0.05 else '#6B7280')
+        return ('%+.2f%%' % v), c
+
     def line(r):
         nm = name_map.get(r['code'], r['code'])
         if not r.get('day'):
             return '<div style="padding:8px 0;">%s %s（%s）：日K没取到，数据故障</div>' % (
                 nm, sp.pure_code(r['code']), r['kind'])
-        color = '#059669' if r['hit_lo'] else '#EA6668'
-        mg_txt = ('%+.2f%%' % r['max_gain']) if r['max_gain'] is not None else '—'
-        cg_txt = ('%+.2f%%' % r['close_gain']) if r['close_gain'] is not None else '—'
+        res_color = ('#EA6668' if r['result'] == '吃到主目标'
+                     else '#2563EB' if r['result'] == '吃到保底' else '#6B7280')
+        mg_txt, mg_c = pf(r['max_gain'])
+        cg_txt, cg_c = pf(r['close_gain'])
+        t = r.get('time') or '—'
         return ('<div style="padding:9px 0;border-bottom:1px solid #eee;">'
                 '<b>%s</b> <span style="color:%s;">%s</span><br>'
-                '<span style="font-size:13px;color:#6B7280;">%s ｜ %s</span><br>'
-                '<span style="font-size:14px;color:#1f2937;">触发 %s ｜ 最高 %s ｜ 收盘 %s</span><br>'
-                '<span style="font-size:14px;color:#6B7280;">最高能赚 %s｜'
-                '收盘 %s</span></div>') % (
-            nm, color, r['result'],
-            sp.pure_code(r['code']), r['kind'],
+                '<span style="font-size:13px;color:#6B7280;">%s ｜ %s ｜ 触发 %s</span><br>'
+                '<span style="font-size:14px;color:#1f2937;">触发价 %s ｜ 最高 %s ｜ 尾盘 %s</span><br>'
+                '<span style="font-size:14px;">最高能赚 <span style="color:%s;">%s</span> ｜ '
+                '收盘盈亏 <span style="color:%s;">%s</span></span></div>') % (
+            nm, res_color, r['result'],
+            sp.pure_code(r['code']), r['kind'], t,
             r['trig_price'], r['real_high'], r['day']['close'],
-            mg_txt, cg_txt)
+            mg_c, mg_txt, cg_c, cg_txt)
     body = ''.join(line(r) for r in rows) or '<div>当天没有发出信号</div>'
     if cum and cum.get('n_signal'):
         foot = ('<div style="margin-top:12px;padding:10px;background:#f0f5ff;border-radius:8px;'
@@ -231,11 +241,17 @@ def build_review_html(date, rows, day_doc, cum):
             return ('<div style="background:#fff;border-radius:14px;padding:14px;margin-bottom:10px;'
                     'border:0.5px solid rgba(0,0,0,0.08);font-size:15px;color:%s;">%s（%s）'
                     '日K未取到，属数据故障，不计入胜率</div>' % (GREY, nm, r['kind']))
-        max_color = GREEN if (r['max_gain'] is not None and r['max_gain'] >= 0) else RED
+        def _color(v):
+            if v is None:
+                return GREY
+            return RED if v >= 0.05 else (GREEN if v <= -0.05 else GREY)
+        max_color = _color(r['max_gain'])
         mg_txt = ('%+.2f%%' % r['max_gain']) if r['max_gain'] is not None else '—'
         cg_txt = ('%+.2f%%' % r['close_gain']) if r['close_gain'] is not None else '—'
-        close_color = GREEN if (r['close_gain'] is not None and r['close_gain'] >= 0) else RED
-        res_color = GREEN if r['hit_lo'] else RED
+        close_color = _color(r['close_gain'])
+        res_color = (RED if r['result'] == '吃到主目标'
+                     else BLUE if r['result'] == '吃到保底' else GREY)
+        t = r.get('time') or '—'
         if r['tgt_lo'] == r['tgt_hi']:
             tgt_txt = '目标价 <b>%s</b>' % r['tgt_lo']
         else:
@@ -253,12 +269,14 @@ def build_review_html(date, rows, day_doc, cum):
                 '<span style="flex-shrink:0;background:%s;color:#fff;font-size:14px;font-weight:700;padding:3px 11px;'
                 'border-radius:999px;">%s</span></div>'
                 '<div style="font-size:14px;color:%s;line-height:1.7;margin-top:6px;">'
+                '触发时间 <b style="color:%s;">%s</b> ｜ %s ｜ %s<br>'
                 '触发价 <b style="color:#1A1B1C;">%s</b> ｜ 最高价 <b style="color:#1A1B1C;">%s</b>'
-                ' ｜ 收盘价 <b style="color:#1A1B1C;">%s</b><br>'
+                ' ｜ 尾盘价 <b style="color:#1A1B1C;">%s</b><br>'
                 '最高能赚 <b style="color:%s;">%s</b> ｜ 收盘盈亏 <b style="color:%s;">%s</b><br>'
                 '%s<br>%s'
                 '</div></div>' % (
-                    nm, res_color, r['result'], GREY,
+                    nm, res_color, r['result'], GREY, BLUE, t,
+                    sp.pure_code(r['code']), r['kind'],
                     r['trig_price'], r['real_high'], r['day']['close'],
                     max_color, mg_txt, close_color, cg_txt,
                     tgt_txt, spike_txt))
