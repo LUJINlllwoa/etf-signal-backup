@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>大盘过滤规则回测 · 20261126</title>
+<title>大盘过滤回测 · 最高价口径 · 20261126</title>
 <style>
   :root{
     --blue:#2563EB; --red:#EA6668; --green:#059669; --gray:#6B7280;
@@ -37,82 +37,73 @@
   .neg{color:var(--green);font-weight:600}
   .note{font-size:12.5px;color:var(--gray);border-top:1px solid var(--line);padding-top:12px;margin-top:6px}
   .note li{margin:5px 0 5px 18px}
-  .split{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0 18px}
-  .split .box{flex:1 1 160px;border:1px solid var(--line);border-radius:14px;padding:14px;text-align:center}
-  .split .box .n{font-size:24px;font-weight:700}
+  .hl{background:#F3F6FC}
 </style>
 </head>
 <body>
-  <h1>大盘过滤规则 · 历史回测对比</h1>
-  <div class="sub">样本 5 个交易日（20261120 / 1123 / 1124 / 1125 / 1126）共 183 笔信号　|　新规则：走弱/回落段暂停港股 下午·反转·二次探底；商品期货、美股、早盘豁免</div>
+  <h1>大盘过滤规则 · 回测对比（最高价口径）</h1>
+  <div class="sub">样本 5 个交易日（1120/1123/1124/1125/1126）共 183 笔　|　主看「触发后 1 分 K 最高价有没有利润」，尾盘收盘盈亏仅作参考</div>
 
   <div class="cards">
     <div class="card old">
       <h2>旧规则（全推）</h2>
       <div class="big">183 笔</div>
-      <div class="mrow"><div class="mlabel"><span>主目标达标</span><b>56.3%</b></div><div class="bar"><i class="red" style="width:56.3%"></i></div></div>
-      <div class="mrow"><div class="mlabel"><span>收盘为正</span><b>31.1%</b></div><div class="bar"><i class="blue" style="width:31.1%"></i></div></div>
-      <div class="mrow"><div class="mlabel"><span>收盘亏损</span><b>67.8%</b></div><div class="bar"><i class="green" style="width:67.8%"></i></div></div>
-      <div class="mrow"><div class="mlabel"><span>平均收盘盈亏</span><b class="neg">-0.68%</b></div></div>
       <div class="mrow"><div class="mlabel"><span>平均最高能赚</span><b class="pos">+0.64%</b></div></div>
+      <div class="mrow"><div class="mlabel"><span>最高中位</span><b>+0.36%</b></div></div>
+      <div class="mrow"><div class="mlabel"><span>主目标达标</span><b>56.3%</b></div><div class="bar"><i class="red" style="width:56.3%"></i></div></div>
+      <div class="mrow"><div class="mlabel"><span>盘中有利润</span><b>83.6%</b></div></div>
+      <div class="mrow"><div class="mlabel"><span>参考·平均收盘</span><b class="neg">-0.68%</b></div></div>
     </div>
     <div class="card keep">
       <h2>新规则 · 放行</h2>
       <div class="big">109 笔</div>
-      <div class="mrow"><div class="mlabel"><span>主目标达标</span><b>64.2%</b></div><div class="bar"><i class="red" style="width:64.2%"></i></div></div>
-      <div class="mrow"><div class="mlabel"><span>收盘为正</span><b>48.6%</b></div><div class="bar"><i class="blue" style="width:48.6%"></i></div></div>
-      <div class="mrow"><div class="mlabel"><span>收盘亏损</span><b>49.5%</b></div><div class="bar"><i class="green" style="width:49.5%"></i></div></div>
-      <div class="mrow"><div class="mlabel"><span>平均收盘盈亏</span><b class="neg">-0.06%</b></div></div>
       <div class="mrow"><div class="mlabel"><span>平均最高能赚</span><b class="pos">+0.89%</b></div></div>
+      <div class="mrow"><div class="mlabel"><span>最高中位</span><b>+0.64%</b></div></div>
+      <div class="mrow"><div class="mlabel"><span>主目标达标</span><b>64.2%</b></div><div class="bar"><i class="red" style="width:64.2%"></i></div></div>
+      <div class="mrow"><div class="mlabel"><span>盘中有利润</span><b>92.7%</b></div></div>
+      <div class="mrow"><div class="mlabel"><span>参考·平均收盘</span><b class="neg">-0.06%</b></div></div>
     </div>
     <div class="card block">
       <h2>新规则 · 拦截</h2>
       <div class="big">74 笔</div>
-      <div class="mrow"><div class="mlabel"><span>主目标达标</span><b>44.6%</b></div><div class="bar"><i class="red" style="width:44.6%"></i></div></div>
-      <div class="mrow"><div class="mlabel"><span>收盘为正</span><b>5.4%</b></div><div class="bar"><i class="blue" style="width:5.4%"></i></div></div>
-      <div class="mrow"><div class="mlabel"><span>收盘亏损</span><b>94.6%</b></div><div class="bar"><i class="green" style="width:94.6%"></i></div></div>
-      <div class="mrow"><div class="mlabel"><span>平均收盘盈亏</span><b class="neg">-1.60%</b></div></div>
       <div class="mrow"><div class="mlabel"><span>平均最高能赚</span><b class="pos">+0.28%</b></div></div>
+      <div class="mrow"><div class="mlabel"><span>最高中位</span><b>+0.21%</b></div></div>
+      <div class="mrow"><div class="mlabel"><span>主目标达标</span><b>44.6%</b></div><div class="bar"><i class="red" style="width:44.6%"></i></div></div>
+      <div class="mrow"><div class="mlabel"><span>盘中有利润</span><b>70.3%</b></div></div>
+      <div class="mrow"><div class="mlabel"><span>参考·平均收盘</span><b class="neg">-1.60%</b></div></div>
     </div>
   </div>
 
-  <div class="split">
-    <div class="box"><div class="n pos">40 笔</div><div>拦对 · 未达标且收盘亏（54.1%）</div></div>
-    <div class="box"><div class="n" style="color:var(--blue)">34 笔</div><div>误杀 · 达标或收盘为正（45.9%）</div></div>
-    <div class="box"><div class="n" style="color:var(--gray)">4 笔</div><div>误杀中仅摸到保底、未到主目标</div></div>
-  </div>
-
-  <h2 style="font-size:17px;margin:18px 0 10px">阈值档位对比（同一批 183 笔）</h2>
+  <h2 style="font-size:17px;margin:18px 0 10px">五档阈值对比（最高价口径）</h2>
   <table>
-    <tr><th class="l">档位（走弱/回落）</th><th>拦截</th><th>放行</th><th>放行达标</th><th>放行收正</th><th>放行亏损</th><th>放行均收</th><th>拦截均收</th><th>误杀</th><th>拦对</th></tr>
-    <tr><td class="l">宽松 -1.5 / -1.5</td><td>38</td><td>145</td><td>61.4%</td><td>38.6%</td><td>60.0%</td><td class="neg">-0.29%</td><td class="neg">-2.19%</td><td>14</td><td>24</td></tr>
-    <tr style="background:#F3F6FC"><td class="l"><b>当前 -1.0 / -1.0</b></td><td><b>74</b></td><td><b>109</b></td><td><b>64.2%</b></td><td><b>48.6%</b></td><td><b>49.5%</b></td><td class="pos"><b>-0.06%</b></td><td class="neg">-1.60%</td><td>34</td><td>40</td></tr>
-    <tr><td class="l">收紧 -0.5 / -0.5</td><td>114</td><td>69</td><td>53.6%</td><td>43.5%</td><td>55.1%</td><td class="neg">-0.37%</td><td class="neg">-0.87%</td><td>67</td><td>47</td></tr>
-    <tr><td class="l">弱 -1.0 / 回落 -1.5</td><td>38</td><td>145</td><td>61.4%</td><td>38.6%</td><td>60.0%</td><td class="neg">-0.29%</td><td class="neg">-2.19%</td><td>14</td><td>24</td></tr>
-    <tr><td class="l">弱 -1.5 / 回落 -1.0</td><td>74</td><td>109</td><td>64.2%</td><td>48.6%</td><td>49.5%</td><td class="neg">-0.06%</td><td class="neg">-1.60%</td><td>34</td><td>40</td></tr>
-  </table>
-  <div class="note" style="border:none;padding:0;margin-bottom:14px">
-    <ul>
-      <li>当前 -1.0% / -1.0% 档放行组均收最接近 0（-0.06%）、亏损率最低（49.5%）、达标率最高（64.2%），综合最优。</li>
-      <li>本批样本拦截主要由「回落阈值 -1.0%」触发；走弱阈值 -1.0 与 -1.5 结果相同（三个弱市日跌幅都超过 -1.5%）。</li>
-      <li>收紧到 -0.5% 误杀 67 笔、误杀率 58.8%，连 1123 强势日都被误拦，不划算。</li>
-    </ul>
-  </div>
-
-  <h2 style="font-size:17px;margin-bottom:10px">分类型表现</h2>
-  <table>
-    <tr><th class="l">类型</th><th>组别</th><th>笔数</th><th>达标率</th><th>收盘为正</th><th>亏损率</th><th>平均收盘</th></tr>
-    <tr><td class="l" rowspan="3">下午顺势</td><td>旧全推</td><td>86</td><td>58.1%</td><td>26.7%</td><td>72.1%</td><td class="neg">-0.81%</td></tr>
-    <tr><td>放行</td><td>36</td><td class="pos">77.8%</td><td class="pos">58.3%</td><td>38.9%</td><td class="pos">+0.49%</td></tr>
-    <tr><td>拦截</td><td>50</td><td>44.0%</td><td>4.0%</td><td class="neg">96.0%</td><td class="neg">-1.75%</td></tr>
-    <tr><td class="l" rowspan="2">反转（坑反弹）</td><td>放行</td><td>10</td><td class="pos">90.0%</td><td class="pos">50.0%</td><td>50.0%</td><td class="neg">-0.02%</td></tr>
-    <tr><td>拦截</td><td>15</td><td>66.7%</td><td>13.3%</td><td class="neg">86.7%</td><td class="neg">-1.07%</td></tr>
-    <tr><td class="l">二次探底</td><td>拦截（全拦）</td><td>9</td><td>11.1%</td><td>0.0%</td><td class="neg">100%</td><td class="neg">-1.62%</td></tr>
-    <tr><td class="l">早盘（豁免）</td><td>放行</td><td>17</td><td>47.1%</td><td>17.6%</td><td>82.4%</td><td class="neg">-1.29%</td></tr>
-    <tr><td class="l">美股 QDII（豁免）</td><td>放行</td><td>46</td><td>54.3%</td><td>52.2%</td><td>45.7%</td><td class="neg">-0.05%</td></tr>
+    <tr><th class="l">档位（走弱/回落）</th><th>拦截</th><th>放行</th><th>放行均最高</th><th>放行中位</th><th>放行达标</th><th>放行有利润</th><th>拦截均最高</th><th>拦截无利润</th><th>硬达标误杀</th></tr>
+    <tr><td class="l">宽松 -1.5 / -1.5</td><td>38</td><td>145</td><td class="pos">+0.74%</td><td>+0.51%</td><td>61.4%</td><td>86.9%</td><td>+0.28%</td><td>28.9%</td><td>14</td></tr>
+    <tr class="hl"><td class="l"><b>当前 -1.0 / -1.0</b></td><td><b>74</b></td><td><b>109</b></td><td class="pos"><b>+0.89%</b></td><td><b>+0.64%</b></td><td><b>64.2%</b></td><td><b>92.7%</b></td><td>+0.28%</td><td>29.7%</td><td>33</td></tr>
+    <tr><td class="l">收紧 -0.5 / -0.5</td><td>114</td><td>69</td><td class="pos">+0.82%</td><td>+0.67%</td><td>53.6%</td><td>94.2%</td><td>+0.54%</td><td>22.8%</td><td>66</td></tr>
   </table>
 
-  <h2 style="font-size:17px;margin-bottom:10px">每日大盘环境（港股池截面代理）</h2>
+  <h2 style="font-size:17px;margin:18px 0 10px">拦截 74 笔 · 盘中利润分层（当前档）</h2>
+  <table>
+    <tr><th class="l">分层</th><th>笔数</th><th>说明</th></tr>
+    <tr><td class="l">触发后最高价完全没利润（≤0）</td><td>22</td><td>拦对：进场后最高点都没超过触发价</td></tr>
+    <tr><td class="l">微利 0 ~ 0.2%</td><td>14</td><td>扣手续费/滑点基本白忙，未摸到保底</td></tr>
+    <tr><td class="l">摸到保底或主目标</td><td>37</td><td>误杀：盘中给到可走的利润空间</td></tr>
+  </table>
+
+  <h2 style="font-size:17px;margin:18px 0 10px">分类型表现（最高价口径 · 当前档）</h2>
+  <table>
+    <tr><th class="l">类型</th><th>组别</th><th>笔数</th><th>均最高</th><th>中位最高</th><th>达标率</th><th>盘中有利润</th></tr>
+    <tr><td class="l" rowspan="3">下午顺势</td><td>旧全推</td><td>86</td><td class="pos">+0.59%</td><td>+0.23%</td><td>58.1%</td><td>76.7%</td></tr>
+    <tr><td>放行</td><td>36</td><td class="pos">+1.13%</td><td>+0.59%</td><td class="pos">77.8%</td><td>88.9%</td></tr>
+    <tr><td>拦截</td><td>50</td><td class="pos">+0.21%</td><td>+0.16%</td><td>44.0%</td><td>68.0%</td></tr>
+    <tr><td class="l" rowspan="2">反转（坑反弹）</td><td>放行</td><td>10</td><td class="pos">+0.55%</td><td>+0.48%</td><td>90.0%</td><td>100%</td></tr>
+    <tr><td>拦截</td><td>15</td><td class="pos">+0.55%</td><td>+0.30%</td><td>66.7%</td><td>93.3%</td></tr>
+    <tr><td class="l">二次探底</td><td>拦截（全拦）</td><td>9</td><td class="pos">+0.21%</td><td>0.00%</td><td>11.1%</td><td>44.4%</td></tr>
+    <tr><td class="l">早盘（豁免）</td><td>放行</td><td>17</td><td class="pos">+0.95%</td><td>+0.32%</td><td>47.1%</td><td>94.1%</td></tr>
+    <tr><td class="l">美股 QDII（豁免）</td><td>放行</td><td>46</td><td class="pos">+0.76%</td><td>+0.68%</td><td>54.3%</td><td>93.5%</td></tr>
+  </table>
+
+  <h2 style="font-size:17px;margin:18px 0 10px">每日大盘环境（港股池截面代理）</h2>
   <table>
     <tr><th class="l">日期</th><th>收盘中位</th><th>盘中中位高</th><th>距高点回落</th><th>判定</th><th>动作</th></tr>
     <tr><td class="l">1120</td><td class="neg">-1.74%</td><td>0.00%</td><td class="neg">-1.74%</td><td><span class="tag t-on">走弱+回落</span></td><td>拦截港股三类</td></tr>
@@ -125,11 +116,11 @@
   <div class="note">
     <b>口径与局限</b>
     <ul>
-      <li>历史指数分时接口当前取不到，大盘环境用「当天港股池 188 只 1 分钟 K 截面中位数」代理；回测按「日级」分层，线上是每轮按指数实时判定，时点更细更准。</li>
-      <li>达标 = 触发后 1 分钟 K 最高收盘摸到主目标；摸到目标但尾盘回落的，按「到目标止盈走人」纪律算达标。亏损 = 收盘仍低于触发价。</li>
-      <li>样本仅 5 个交易日，其中 3 天为弱市/回落日；结论方向可信，具体比例会随样本扩大波动。</li>
-      <li>前四天结果取自 verify 归档，1126 由当日 m1 重算；止损未做触发后跌破止损价的统一重算（前四天未归档止损价），亏损以收盘为负近似。</li>
-      <li>商品期货（159980 / 159981 / 159985）与美股 QDII 不跟随恒指/恒科，按规则豁免，不在拦截范围。</li>
+      <li>主指标 max_gain = 触发后 1 分 K 最高收盘相对触发价；达标 = 摸到主目标，保底 = 摸到保底目标；尾盘收盘盈亏仅作参考。</li>
+      <li>历史指数分时接口取不到，大盘用港股池 188 只 m1 截面中位数代理，日级分层；线上是每轮按指数实时判定，时点更细。</li>
+      <li>样本仅 5 个交易日，其中 3 天为弱市/回落日；方向可信，比例会随样本扩大波动。</li>
+      <li>下午顺势单过滤区分度最强（放行均最高 +1.13% vs 拦截 +0.21%）；反转单在弱市/回落段盘中大多仍摸过红盘，大盘开关对其区分度较弱。</li>
+      <li>商品期货（159980/159981/159985）与美股 QDII 不跟随恒指/恒科，按规则豁免。</li>
     </ul>
   </div>
 </body>
