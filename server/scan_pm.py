@@ -123,10 +123,11 @@ SB_STOP = 0.4           # 止损 -0.4%
 
 # —— 大盘环境开关（弱市自动踩刹车）——
 INDEX_CODES = ['r_hkHSI', 'r_hkHSTECH']  # 恒生指数、恒生科技
-INDEX_WEAK_PCT = -1.0   # 任一指数跌幅达到/超过 1% 即判弱市
-CRASH_PCT = -3.0       # 任一指数跌幅达到/超过 3% 即判暴跌硬熔断：所有信号（含下午单）全部停止，30天5526样本暴跌安全率仅4%
+INDEX_WEAK_PCT = -1.0   # 任一指数对开盘跌幅达到/超过 1% 即判弱市
+CRASH_PCT = -3.0       # 任一指数对开盘跌幅达到/超过 3% 即判暴跌硬熔断：所有信号（含下午单）全部停止，30天5526样本暴跌安全率仅4%
+HIGH_PULL_PCT = -1.0   # 任一指数距日内最高点回落达到/超过 1% 即判“回落段”：指数下滑过程中顺势单基本不达标（ETF 跟随指数回落）
 WEAK_PM_W = 0.2         # 弱市下午成分加权门槛抬高：强共振才进
-MARKET = {'state': 'normal', 'hsi': None, 'hstech': None}
+MARKET = {'state': 'normal', 'hsi': None, 'hstech': None, 'pullback': False}
 
 ZOMBIES = {'sh513680', 'sh513790', 'sh513960', 'sz159799', 'sz159963'}
 
@@ -213,7 +214,8 @@ def visible_codes():
 
 
 def fetch_market():
-    """取恒生指数、恒生科技实时涨跌幅。返回 {'hsi':{name,pct},'hstech':{...}}；
+    """取恒生指数、恒生科技实时行情。涨跌幅一律以今日开盘价为基准（对齐个股 rt_open 口径），
+    另算距日内最高点回落幅度 high_pull。返回 {'hsi':{name,pct,high_pull},...}；
     取不到/旧帧返回 None（保守处理，不因为接口抖动乱停信号）。"""
     try:
         url = 'https://qt.gtimg.cn/q=' + ','.join(INDEX_CODES)
@@ -225,16 +227,17 @@ def fetch_market():
                 continue
             p = line.split('~')
             try:
-                now, prev = float(p[3]), float(p[4])
+                now, prev, op, hi = float(p[3]), float(p[4]), float(p[5]), float(p[33])
             except Exception:
                 continue
-            if now <= 0 or prev <= 0:
+            if now <= 0 or op <= 0:
                 continue
-            pct = round((now / prev - 1) * 100, 2)
+            pct = round((now / op - 1) * 100, 2)  # 对今日开盘，不对昨收
+            high_pull = round((now / hi - 1) * 100, 2) if hi > 0 else None
             if 'r_hkHSTECH' in line:
-                out['hstech'] = {'name': p[1], 'pct': pct}
+                out['hstech'] = {'name': p[1], 'pct': pct, 'high_pull': high_pull}
             elif 'r_hkHSI' in line:
-                out['hsi'] = {'name': p[1], 'pct': pct}
+                out['hsi'] = {'name': p[1], 'pct': pct, 'high_pull': high_pull}
         return out or None
     except Exception as e:
         print('大盘指数取数失败，按正常环境处理:', e)
@@ -243,13 +246,14 @@ def fetch_market():
 
 def market_state():
     """刷新全局 MARKET 并返回三级状态：
-    任一指数跌幅达到 CRASH_PCT 判 crash（硬熔断全停）；
+    任一指数对开盘跌幅达到 CRASH_PCT 判 crash（硬熔断全停）；
     达到 INDEX_WEAK_PCT 判 weak（早盘/反转暂停，下午强共振）；
+    任一指数距日内高点回落达到 HIGH_PULL_PCT 标记 pullback（回落段，下午顺势单暂停）；
     取不到数保守判 normal，不阻断信号。"""
     m = fetch_market()
     MARKET['hsi'] = m['hsi'] if m else None
     MARKET['hstech'] = m['hstech'] if m else None
-    weak = crash = False
+    weak = crash = pullback = False
     if m:
         for k in ('hsi', 'hstech'):
             if not m.get(k):
@@ -258,12 +262,20 @@ def market_state():
                 crash = True
             elif m[k]['pct'] <= INDEX_WEAK_PCT:
                 weak = True
+            hp = m[k].get('high_pull')
+            if hp is not None and hp <= HIGH_PULL_PCT:
+                pullback = True
     MARKET['state'] = 'crash' if crash else ('weak' if weak else 'normal')
+    MARKET['pullback'] = pullback
     return MARKET
 
 
 def is_weak():
     return MARKET.get('state') in ('weak', 'crash')
+
+
+def is_pullback():
+    return MARKET.get('pullback', False)
 
 
 def is_crash():
@@ -1004,9 +1016,14 @@ def push_am_locked(doc, quotes, states):
 
 
 def push_pm(doc, quotes, states):
-    """下午：每只 confirm 都推。暴跌硬熔断时全部不推（30天样本暴跌安全率仅4%）。"""
+    """下午：每只 confirm 都推。暴跌硬熔断时全部不推（30天样本暴跌安全率仅4%）；
+    大盘回落段（距日内高点回落超阈值）顺势单暂停，ETF 跟随指数下滑基本不达标。"""
     if is_crash():
         print('暴跌硬熔断，下午信号全部暂停（不新开，等大盘企稳）')
+        doc['fired_pm'] = sorted(set(doc['fired_pm']))
+        return []
+    if is_pullback():
+        print('大盘回落段（距高点回落 ≥%.1f%%），下午顺势信号暂停（ETF 跟随指数下滑）' % abs(HIGH_PULL_PCT))
         doc['fired_pm'] = sorted(set(doc['fired_pm']))
         return []
     # 当日已推过的票（含早盘）不重复推，避免覆盖早盘持仓记录；仅破止损后的合法重进例外
@@ -1308,9 +1325,11 @@ def scan_once(force=False):
         return 0
     doc = load_state()
     mk = market_state()
-    doc['market'] = {'state': mk['state'],
+    doc['market'] = {'state': mk['state'], 'pullback': mk.get('pullback', False),
                      'hsi': mk['hsi']['pct'] if mk['hsi'] else None,
-                     'hstech': mk['hstech']['pct'] if mk['hstech'] else None}
+                     'hstech': mk['hstech']['pct'] if mk['hstech'] else None,
+                     'hsi_pull': mk['hsi']['high_pull'] if mk['hsi'] else None,
+                     'hstech_pull': mk['hstech']['high_pull'] if mk['hstech'] else None}
     codes = visible_codes()
     # 刷新美股净值缓存（静态预热，不临时估算）
     US_NAV_CACHE.clear()
@@ -1325,9 +1344,9 @@ def scan_once(force=False):
         return 0
     is_am = t <= AM_END
     states = doc['am'] if is_am else doc['pm']
+    mk_tag = '弱市' if is_weak() else ('回落段' if is_pullback() else '正常')
     print('%s扫描 %s  行情 %d 只 @%d  大盘%s' % (
-        '早盘' if is_am else '下午', TODAY, len(quotes), t,
-        '弱市' if is_weak() else '正常'))
+        '早盘' if is_am else '下午', TODAY, len(quotes), t, mk_tag))
 
     rev_states = doc['rev']
     # 顺势候选（对开盘涨）+ 各自 ready
