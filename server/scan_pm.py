@@ -1499,7 +1499,20 @@ def supervisord_alive():
     return True
 
 
+def loop_running():
+    """是否已有 scan_pm --loop 常驻进程在跑（系统托管或用户态兜底均可），避免双开。"""
+    try:
+        out = subprocess.run(['pgrep', '-f', 'python3 scan_pm.py --loop'],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        return bool(out)
+    except Exception:
+        return False
+
+
 def ensure_daemon():
+    if loop_running():
+        print('已有 scan_pm --loop 常驻在跑，无需拉起（系统托管/兜底均不双开）', flush=True)
+        return
     if supervisord_alive():
         print('supervisord 保活实例存活，scan_pm 由其托管（崩溃秒级重启），无需拉起')
         return
