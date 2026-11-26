@@ -1236,7 +1236,9 @@ def track_positions(doc, quotes, t):
                             ('%.3f' % qt['now']) if qt.get('now') else '—'),
                         code)
                 continue
-            if qt.get('low') and qt['low'] <= p['stop']:
+            # 止损只看触发之后的现价：日内累计最低(qt['low'])含触发前早盘探底的坑底低点，
+            # 拿它判新仓会把“早盘砸过、下午反弹拉起”的票刚触发就误判止损（信号/止损相隔1秒）。
+            if qt.get('now') is not None and qt['now'] <= p['stop']:
                 p['status'] = 'stopped'
                 do_push('跌破止损·%s' % (qt['name'] if qt else code),
                         ('%s %s信号\n触发价 %.3f 目标 %.3f 止损 %.3f 现价 %s\n'
