@@ -282,6 +282,13 @@ def is_crash():
     return MARKET.get('state') == 'crash'
 
 
+def is_hk_down_env():
+    """港股大盘走弱/回落过程中：任一指数对开盘走弱(weak) 或 距日内高点回落(pullback)。
+    此环境下跟踪恒指/恒科的 ETF 反弹多为下跌中继反抽，顺势/反转/二次探底一律暂停；
+    指数每轮实时刷新，拉升回红盘/站回高点后自动解除。美股 QDII、商品期货不在此列。"""
+    return is_weak() or is_pullback()
+
+
 def rev_regime_blocked(doc, quotes):
     """方案B 市场环境开关：9:35 后统计“现价贴着当日最低且在跌”的票占比，
     ≥REV_REGIME_THRESH 判定为系统性普跌日，当天坑反弹整体关闭，结果按日期缓存。"""
@@ -1022,8 +1029,8 @@ def push_pm(doc, quotes, states):
         print('暴跌硬熔断，下午信号全部暂停（不新开，等大盘企稳）')
         doc['fired_pm'] = sorted(set(doc['fired_pm']))
         return []
-    if is_pullback():
-        print('大盘回落段（距高点回落 ≥%.1f%%），下午顺势信号暂停（ETF 跟随指数下滑）' % abs(HIGH_PULL_PCT))
+    if is_hk_down_env():
+        print('大盘走弱/回落段（weak/回落 ≥%.1f%%），下午顺势信号暂停（指数未止跌，ETF 跟随下滑基本不达标）' % abs(HIGH_PULL_PCT))
         doc['fired_pm'] = sorted(set(doc['fired_pm']))
         return []
     # 当日已推过的票（含早盘）不重复推，避免覆盖早盘持仓记录；仅破止损后的合法重进例外
@@ -1081,11 +1088,12 @@ def push_rev(doc, quotes, states):
     if is_crash():
         print('暴跌硬熔断，坑反弹暂停（不接飞刀，等大盘企稳）')
         return []
+    if is_hk_down_env():
+        print('大盘走弱/回落段，坑反弹暂停（指数未止跌，不接飞刀，等拉升回来）@%d' % now_min())
+        return []
     if rev_regime_blocked(doc, quotes):
         print('普跌日，坑反弹整体关闭 @%d' % now_min())
         return []
-    if is_weak():
-        print('弱市坑反弹照常推送 @%d' % now_min())
     fired = set(doc['fired_rev'])
     already = set(doc['fired_am']) | set(doc['fired_pm']) | fired
     conf = [(c, states[c]) for c in states
@@ -1140,9 +1148,9 @@ def push_sb(doc, quotes, states):
         print('暴跌硬熔断，二次探底信号暂停（不接飞刀）')
         doc['fired_sb'] = sorted(set(doc.get('fired_sb', [])))
         return []
-    if is_weak():
-        # 回测：普跌环境 W 底达标率仅 3.8%、止损率 92%，弱市默认不推，避免在下跌中继接飞刀
-        print('弱市二次探底默认不推（回测普跌日达标率仅3.8%%）@%d' % now_min())
+    if is_hk_down_env():
+        # 回测：普跌环境 W 底达标率仅 3.8%、止损率 92%；回落段指数未止跌，双底易破，默认不推
+        print('大盘走弱/回落段，二次探底暂停（不接飞刀，等指数止跌拉升）@%d' % now_min())
         doc['fired_sb'] = sorted(set(doc.get('fired_sb', [])))
         return []
     already = (set(doc['fired_am']) | set(doc['fired_pm'])
