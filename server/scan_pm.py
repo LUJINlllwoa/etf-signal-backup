@@ -126,8 +126,10 @@ INDEX_CODES = ['r_hkHSI', 'r_hkHSTECH']  # 恒生指数、恒生科技
 INDEX_WEAK_PCT = -1.0   # 任一指数对开盘跌幅达到/超过 1% 即判弱市
 CRASH_PCT = -3.0       # 任一指数对开盘跌幅达到/超过 3% 即判暴跌硬熔断：所有信号（含下午单）全部停止，30天5526样本暴跌安全率仅4%
 HIGH_PULL_PCT = -1.0   # 任一指数距日内最高点回落达到/超过 1% 即判“回落段”：指数下滑过程中顺势单基本不达标（ETF 跟随指数回落）
+REBOUND_PCT = 0.3      # 反弹启动：走弱/回落期间从滚动低点向上拉起达到 0.3%，即判拐头向上、解除港股三类拦截（不必等站回最高点）；crash 熔断不被反弹解除
 WEAK_PM_W = 0.2         # 弱市下午成分加权门槛抬高：强共振才进
-MARKET = {'state': 'normal', 'hsi': None, 'hstech': None, 'pullback': False}
+MARKET = {'state': 'normal', 'hsi': None, 'hstech': None, 'pullback': False,
+          'pull_low': None, 'rebound': False}
 
 ZOMBIES = {'sh513680', 'sh513790', 'sh513960', 'sz159799', 'sz159963'}
 
@@ -247,26 +249,41 @@ def fetch_market():
 def market_state():
     """刷新全局 MARKET 并返回三级状态：
     任一指数对开盘跌幅达到 CRASH_PCT 判 crash（硬熔断全停）；
-    达到 INDEX_WEAK_PCT 判 weak（早盘/反转暂停，下午强共振）；
-    任一指数距日内高点回落达到 HIGH_PULL_PCT 标记 pullback（回落段，下午顺势单暂停）；
-    取不到数保守判 normal，不阻断信号。"""
+    达到 INDEX_WEAK_PCT 判 weak（走弱）；
+    任一指数距日内高点回落达到 HIGH_PULL_PCT 标记 pullback（回落段）；
+    走弱/回落期间滚动记录各指数低点，现价从低点拉起 ≥ REBOUND_PCT 判 rebound（拐头向上），
+    解除港股三类拦截；crash 熔断不被 rebound 解除。取不到数保守判 normal，不阻断信号。"""
     m = fetch_market()
     MARKET['hsi'] = m['hsi'] if m else None
     MARKET['hstech'] = m['hstech'] if m else None
     weak = crash = pullback = False
+    cur = {}
     if m:
         for k in ('hsi', 'hstech'):
             if not m.get(k):
                 continue
-            if m[k]['pct'] <= CRASH_PCT:
+            p = m[k]['pct']
+            cur[k] = p
+            if p <= CRASH_PCT:
                 crash = True
-            elif m[k]['pct'] <= INDEX_WEAK_PCT:
+            elif p <= INDEX_WEAK_PCT:
                 weak = True
             hp = m[k].get('high_pull')
             if hp is not None and hp <= HIGH_PULL_PCT:
                 pullback = True
+    down = weak or pullback
+    lows = MARKET.setdefault('lows', {})
+    rebound = False
+    if down and cur:
+        for k, p in cur.items():
+            lows[k] = p if k not in lows else min(lows[k], p)
+        rebound = any(p >= lows[k] + REBOUND_PCT for k, p in cur.items() if k in lows)
+    else:
+        lows.clear()
     MARKET['state'] = 'crash' if crash else ('weak' if weak else 'normal')
     MARKET['pullback'] = pullback
+    MARKET['rebound'] = rebound
+    MARKET['pull_low'] = min(lows.values()) if lows else None
     return MARKET
 
 
@@ -282,11 +299,19 @@ def is_crash():
     return MARKET.get('state') == 'crash'
 
 
+def is_rebound():
+    """大盘从回落低点拐头向上拉起 ≥ REBOUND_PCT（反弹启动），解除港股三类拦截；crash 不被解除。"""
+    return MARKET.get('rebound', False)
+
+
 def is_hk_down_env():
     """港股大盘走弱/回落过程中：任一指数对开盘走弱(weak) 或 距日内高点回落(pullback)。
     此环境下跟踪恒指/恒科的 ETF 反弹多为下跌中继反抽，顺势/反转/二次探底一律暂停；
-    指数每轮实时刷新，拉升回红盘/站回高点后自动解除。美股 QDII、商品期货不在此列。"""
-    return is_weak() or is_pullback()
+    指数每轮实时刷新，从低点拐头拉起(rebound)或站回高点后自动解除；crash 硬熔断不解除。
+    美股 QDII、商品期货不在此列。"""
+    if is_crash():
+        return True
+    return (is_weak() or is_pullback()) and not is_rebound()
 
 
 def hk_index_tied(code):
@@ -1344,6 +1369,7 @@ def scan_once(force=False):
     doc = load_state()
     mk = market_state()
     doc['market'] = {'state': mk['state'], 'pullback': mk.get('pullback', False),
+                     'rebound': mk.get('rebound', False),
                      'hsi': mk['hsi']['pct'] if mk['hsi'] else None,
                      'hstech': mk['hstech']['pct'] if mk['hstech'] else None,
                      'hsi_pull': mk['hsi']['high_pull'] if mk['hsi'] else None,
@@ -1362,7 +1388,8 @@ def scan_once(force=False):
         return 0
     is_am = t <= AM_END
     states = doc['am'] if is_am else doc['pm']
-    mk_tag = '弱市' if is_weak() else ('回落段' if is_pullback() else '正常')
+    mk_tag = ('暴跌' if is_crash() else ('反弹启动' if is_rebound() else
+              ('弱市' if is_weak() else ('回落段' if is_pullback() else '正常'))))
     print('%s扫描 %s  行情 %d 只 @%d  大盘%s' % (
         '早盘' if is_am else '下午', TODAY, len(quotes), t, mk_tag))
 
