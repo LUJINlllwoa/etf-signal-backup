@@ -223,6 +223,7 @@ header.top{position:sticky;top:59px;z-index:10;background:var(--bg);padding:14px
       <div class="sig-page-title">今日信号</div>
       <div class="sig-page-sub" id="sig-page-sub">自动刷新中…</div>
     </div>
+    <div id="cloud-panel"></div>
     <div class="signal-flow">
       <div class="alert-bar" id="alert-bar" style="display:none"></div>
       <div class="alert-bar" id="breakout-bar"><div class="brk-head"><span class="brk-title">启动信号 · 开盘第一波</span><span class="brk-state">未开盘</span></div><div class="brk-idle">等待开盘信号…</div></div>
@@ -380,36 +381,6 @@ function commodityCompLive(code){
  }
  return {red_rate:n?red/n:null,eq:n?sv/n:null,w:ww?wv/ww:null,n:n};
 }
-// 期货 ETF 详情：成分是期货合约，渲染各合约实时涨跌（东方财富），不套用港股那套
-async function renderCommodityHoldings(code){
- var hs=COMMODITY_HOLDINGS[code]||[];
- // 缺哪个合约实时数据就补哪个
- await Promise.all(hs.map(async function(x){
-  if(S.fut[x.secid]===undefined){
-   var d=await jsonpFut(x.secid);
-   if(d&&d.data&&d.data.f170!==undefined&&d.data.f170!==null){ S.fut[x.secid]=d.data.f170/100; }
-  }
- }));
- var sumW=0; hs.forEach(function(x){ sumW+=(+x.w||0); });
- document.getElementById('hold-weight').textContent=sumW>0?('权重按合约配置 · 合计 '+(sumW*100).toFixed(0)+'%'):'权重暂缺';
- var live=commodityCompLive(code), eq=live?live.eq:null, wAvg=live?live.w:null;
- var nUp=0,nDown=0;
- hs.forEach(function(x){ var v=S.fut[x.secid]; if(v===undefined)return; if(v>0.005)nUp++; else if(v<-0.005)nDown++; });
- var avgEl=document.getElementById('hold-avg');
- if(avgEl){
-  avgEl.innerHTML='<div class="avg-pill"><div class="v mono '+cls(eq)+'">'+fmtPct(eq)+'</div><div class="l">等权平均</div></div>'+
-   '<div class="avg-pill"><div class="v mono '+cls(wAvg)+'">'+fmtPct(wAvg)+'</div><div class="l">加权平均（贴近净值）</div></div>'+
-   '<div class="avg-pill"><div class="v mono"><span class="up">'+nUp+'</span> / <span class="down">'+nDown+'</span></div><div class="l">涨 '+nUp+' · 跌 '+nDown+'</div></div>';
- }
- var hl='';
- if(!hs.length){ hl='<div class="empty">暂无成分股数据</div>'; }
- hs.forEach(function(x){
-  var v=S.fut[x.secid];
-  hl+='<div class="hrow"><div class="main"><div class="name">'+esc(x.name)+'</div><div class="code">'+x.secid+'<span class="wt">权重 '+((+x.w*100).toFixed(1))+'%</span></div></div>'+
-   '<div class="bars3"><div class="col"><div class="pct mono '+cls(v)+'">'+fmtPct(v)+'</div><div class="lab">实时涨跌</div></div></div></div>';
- });
- document.getElementById('hold-list').innerHTML=hl;
-}
 function usPremiumLive(code, q){
  // 白天美股闭市：净值用腾讯实时 IOPV，现溢价优先用官方实时值，静态快照已废弃
  if(!q||q.now==null) return null;
@@ -422,7 +393,7 @@ function usPremiumLive(code, q){
    highPrem:premNow>=US_HIGH_PREM, premOk:contract>-US_PREM_CONTRACT};
 }
 function activeCodes(){ return ETF_LIST.map(function(x){return x[0];}).filter(function(c){return !ZOMBIES[c];}); }
-var S = { fut:{}, quotes:{}, m5:{}, m1:{}, minute:{}, minK:{}, stockMin:{}, favs:{}, sort:'b1', detail:null, stock:null, kmode:'m5', chart:null, stockChart:null, done:0, total:activeCodes().length, timer:null, detailTimer:null, auto:true, autoSec:2, alertThr:0, alerted:{}, qround:0, mirrorIdx:0, qtIdx:0, warming:false, warmingM1:false, liveTimer:null, stockTimer:null, holdTimer:null, holdBusy:false, holdMinTick:0, syncAlerted:false, syncStreak:0, lastRows:null, lastEr:0, compQ:{}, avgCache:{}, compBusy:false, cooldown:{}, syncUntil:0, lowupAlerted:{}, lastTs:null, staleSet:{} };
+var S = { fut:{}, quotes:{}, m5:{}, m1:{}, minute:{}, minK:{}, stockMin:{}, favs:{}, sort:'b1', detail:null, stock:null, kmode:'m5', chart:null, stockChart:null, done:0, total:activeCodes().length, timer:null, detailTimer:null, auto:true, autoSec:2, alertThr:0, alerted:{}, qround:0, mirrorIdx:0, qtIdx:0, warming:false, warmingM1:false, liveTimer:null, stockTimer:null, holdTimer:null, holdBusy:false, holdMinTick:0, syncAlerted:false, syncStreak:0, lastRows:null, lastEr:0, compQ:{}, avgCache:{}, compBusy:false, cooldown:{}, syncUntil:0, lowupAlerted:{}, lastTs:null, staleSet:{}, cloud:null, cloudTs:0, cloudErr:null };
 // 昨成交动态覆盖表：启动时若同目录存在 prev_amt.json 则合并；离线/缺失回退内嵌第三列
 var PREV_AMT={};
 var compReady=false; // 成分股现价/分时首批是否已拉全；未拉全前列表成分均值显“加载中”
@@ -604,6 +575,102 @@ async function fetchMirror(path,code,kind){
   return null;
 }
 
+// 云端信号同步：以服务端按新规则产出的信号 + 大盘状态为准，与微信/ntfy 推送一致
+var CLOUD_URLS=[
+  'https://raw.githubusercontent.com/LUJINlllwoa/etf-signal-backup/main/signals/cloud_signals.json',
+  'https://cdn.jsdelivr.net/gh/LUJINlllwoa/etf-signal-backup@main/signals/cloud_signals.json'
+];
+function toPrefixed(code, code6){
+  var c=code||code6||'';
+  if(c.slice(0,2)==='sh'||c.slice(0,2)==='sz') return c;
+  if(/^6/.test(c)) return 'sh'+c;
+  if(/^[013]/.test(c)) return 'sz'+c;
+  return c;
+}
+async function fetchCloud(){
+  var ts=Date.now();
+  for(var i=0;i<CLOUD_URLS.length;i++){
+    try{
+      var resp=await fetch(CLOUD_URLS[i]+'?_='+ts,{cache:'no-store'});
+      if(!resp||!resp.ok) continue;
+      var j=await resp.json();
+      if(j&&Array.isArray(j.signals)){ S.cloud=j; S.cloudTs=ts; S.cloudErr=null; return j; }
+    }catch(e){}
+  }
+  S.cloudErr='云端信号暂不可达'; return null;
+}
+function cloudMarketTxt(mk){
+  if(!mk) return '—';
+  var hsi=mk.hsi==null?'—':(mk.hsi>=0?'+':'')+mk.hsi.toFixed(2)+'%';
+  var hs=mk.hstech==null?'—':(mk.hstech>=0?'+':'')+mk.hstech.toFixed(2)+'%';
+  return '恒指 '+hsi+' · 恒生科技 '+hs;
+}
+function cloudBadgeClass(tag){
+  if(tag==='暴跌') return 'crash';
+  if(tag==='弱市'||tag==='回落段') return 'weak';
+  return 'ok';
+}
+function renderCloud(){
+  var panel=document.getElementById('cloud-panel'); if(!panel) return;
+  var c=S.cloud;
+  if(!c){
+    panel.innerHTML='<div class="siglog-row"><div class="brk-idle">'+(S.cloudErr||'正在从云端同步信号…')+'</div></div>';
+    return;
+  }
+  var mk=c.market||{};
+  var tag=mk.tag||'正常';
+  var summ=c.summary||{};
+  var n=c.signals?c.signals.length:0;
+  var uph=summ.avg_hi, cl=summ.avg_cl;
+  var head='<div class="sig-page-head"><div class="sig-page-title">云端同步</div>'+
+    '<div class="sig-page-sub">与微信推送 · 云端信号一致 · 更新 '+(c.generated_at||'')+'</div></div>';
+  var mkt='<div class="market-badge '+cloudBadgeClass(tag)+'" style="display:block;margin-top:6px">'+
+    '大盘 '+esc(tag)+'：'+esc(cloudMarketTxt(mk))+'</div>';
+  var sumBar='<div class="sig-summary"><div class="sig-sum-lbl">今日信号 '+n+' 只'+(summ.total!=null?' · 收盘绩效 '+summ.total+' 只':'')+'</div>';
+  if(uph!=null) sumBar+='<div class="sig-sum-main">平均最高 <span class="'+cls(uph)+'">'+fmtPct(uph)+'</span>';
+  if(cl!=null) sumBar+=' · 平均收盘 <span class="'+cls(cl)+'">'+fmtPct(cl)+'</span>';
+  sumBar+='</div></div>';
+  var h=head+mkt+sumBar;
+  // 低开高走
+  if(c.lowup&&c.lowup.length){
+    h+='<div class="grp-head">低开高走 · '+c.lowup.length+' 只</div>';
+    for(var li=0;li<c.lowup.length;li++){
+      var L=c.lowup[li];
+      h+='<div class="siglog-row">'+
+        '<div class="tr-top"><span class="tr-name">'+esc(L.name||L.code)+'</span><span class="brk-tag blue">'+esc(L.root_txt||'')+'</span></div>'+
+        '<div class="sub">'+esc(L.code)+(L.time?' · '+L.time:'')+'</div>'+
+        '<div class="sig-line"><span class="sig-lbl">入场</span><span class="sig-val">'+(L.entry!=null?L.entry:'—')+'</span>'+
+        '<span class="sig-prof '+cls(L.hi_pct)+'">最高 '+fmtPct(L.hi_pct)+'</span>'+
+        '<span class="sig-prof '+cls(L.cl_pct)+'">收盘 '+fmtPct(L.cl_pct)+'</span></div>'+
+      '</div>';
+    }
+  }
+  // 正式信号
+  if(n){
+    h+='<div class="grp-head alt">正式信号 · '+n+' 只</div>';
+    for(var si=0;si<c.signals.length;si++){
+      var x=c.signals[si];
+      var pf=toPrefixed(x.code,x.code6);
+      var kind=x.kind||'';
+      var st=x.status||'';
+      var stCls=st==='stopped'||st==='closed'?'closed':'hold';
+      h+='<div class="siglog-row">'+
+        '<div class="tr-top"><span class="tr-name">'+esc(x.name||pf)+'</span><span class="pill-status '+stCls+'">'+esc(st||'持仓')+'</span></div>'+
+        '<div class="sub">'+esc(kind)+' · '+esc(pf)+(x.time?' · '+x.time:'')+'</div>'+
+        '<div class="sig-line"><span class="sig-lbl">触发</span><span class="sig-val">'+(x.trig!=null?x.trig:'—')+'</span>'+
+        (x.target!=null?'<span class="sig-lbl">目标 '+x.target+'</span>':'')+
+        (x.stop!=null?'<span class="sig-lbl">止损 '+x.stop+'</span>':'')+'</div>'+
+        '<div class="sig-line">'+
+        (x.hi_pct!=null?'<span class="sig-lbl">最高</span><span class="sig-val">'+(x.high!=null?x.high:'—')+'</span><span class="sig-prof '+cls(x.hi_pct)+'">'+fmtPct(x.hi_pct)+'</span>':'<span class="sig-lbl">最高</span><span class="sig-val">—</span>')+
+        (x.cl_pct!=null?'<span class="sig-prof '+cls(x.cl_pct)+'">收盘 '+fmtPct(x.cl_pct)+'</span>':'')+
+        '<span class="copy-mini" data-copy="'+esc(pf)+'">复制代码</span></div>'+
+      '</div>';
+    }
+  }else{
+    h+='<div class="empty">今日暂无正式信号</div>';
+  }
+  panel.innerHTML=h;
+}
 var QT_HOSTS=['https://qt.gtimg.cn','http://qt.gtimg.cn'];
 async function fetchQuotes(codes){
   var out={};
@@ -682,27 +749,22 @@ async function marketState(){
 }
 function isWeak(){ return MARKET.state==='weak'||MARKET.state==='crash'; }
 function isCrash(){ return MARKET.state==='crash'; }
-// 方案B 环境开关：9:35后统计“贴当日最低且在跌”票占比，普跌日关闭，当天缓存
-var revRegimeCache={date:null,blocked:false};
-function revRegimeBlocked(){
-  var d=new Date(), today=''+d.getFullYear()+(''+(d.getMonth()+1)).padStart(2,'0')+(''+d.getDate()).padStart(2,'0');
-  var t=d.getHours()*60+d.getMinutes();
-  if(revRegimeCache.date===today) return revRegimeCache.blocked;
-  if(t<575) return false;
-  var nl=0,n=0;
-  for(var code in S.quotes){
-    var q=S.quotes[code];
-    if(!q||!q.low||q.now==null||!q.open) continue;
-    n++;
-    if(q.now<q.open&&(q.now/q.low-1)*100<=REV_NL_TOL) nl++;
-  }
-  var blocked=n>0&&(nl/n*100)>=REV_REGIME_THRESH;
-  revRegimeCache={date:today,blocked:blocked};
-  return blocked;
-}
 function renderMarketBadge(){
   var el=document.getElementById('market-badge');
   if(!el) return;
+  // 优先云端大盘状态（与服务端新规则一致）；云端不可达再回退本地判断
+  if(S.cloud&&S.cloud.market){
+    var mk=S.cloud.market, tag=mk.tag||'正常';
+    el.style.display='block';
+    el.className='market-badge '+cloudBadgeClass(tag);
+    var note='';
+    if(tag==='暴跌') note=' — 所有信号全部停止，不新开、不接飞刀，等大盘企稳';
+    else if(tag==='反弹启动') note=' — 大盘从回落低点拐头向上，解除港股拦截';
+    else if(tag==='弱市') note=' — 早盘观望不抄底，下午只做强共振';
+    else if(tag==='回落段') note=' — 距日内高点回落，顺势单暂停';
+    el.innerHTML='大盘 '+esc(tag)+'：'+esc(cloudMarketTxt(mk))+note;
+    return;
+  }
   function txt(k){ var x=MARKET[k]; return x?x.name+' '+x.pct.toFixed(2)+'%':'—'; }
   if(isCrash()){
     el.style.display='block';
@@ -1286,6 +1348,7 @@ function nowTs(){ var d=new Date(); function z(n){return (n<10?'0':'')+n;} retur
 async function loadAll(){
   S.done=0; S.m5={}; S.quotes={};
   marketState().then(renderMarketBadge);
+  fetchCloud().then(function(){ renderCloud(); renderMarketBadge(); });
   document.getElementById('meta').textContent='行情打底中…';
   var codes=activeCodes();
   S.quotes=await fetchQuotes(codes);
@@ -1811,9 +1874,6 @@ async function renderDetail(forceMin){
   S.dayCache[code]=dk;
   if(S.kmode==='day') renderKline('day');
 
-  // 期货 ETF：成分是期货合约，走独立渲染（实时涨跌），不套用港股那套
-  if(COMMODITY_CODES[code]){ await renderCommodityHoldings(code); return; }
-
   var stocks=meta?meta.s:[];
   var sumW=0; for(var si=0;si<stocks.length;si++) sumW+=(+stocks[si].w||0);
   document.getElementById('hold-weight').textContent=sumW>0?'权重按净值归一 · 合计 100%':'权重暂缺';
@@ -2034,6 +2094,8 @@ function route(){
     stopDetailTimer(); stopStockTimer();
     document.getElementById('top-header').style.display='none';
     markNav('signals');
+    renderCloud();
+    if(!S.cloud) fetchCloud().then(function(){ renderCloud(); renderMarketBadge(); });
     if(!S.auto) startAuto();   // 信号页自动刷新不停，4 类卡片实时更新
   }else if(h.indexOf('#/backtest')===0){
     S.detail=null; S.stock=null;
@@ -2064,6 +2126,9 @@ async function refreshQuotes(){
     MARKET._last=nowTs();
     marketState().then(renderMarketBadge);
   }
+  if(!S.cloudTs||nowTs()-S.cloudTs>30000){
+    fetchCloud().then(function(){ renderCloud(); renderMarketBadge(); });
+  }
   var codes=activeCodes();
   S.quotes=await fetchQuotes(codes);
   S.lastTs=nowTs();
@@ -2072,18 +2137,13 @@ async function refreshQuotes(){
   S.staleSet=ns;
   S.qround++;
   renderList();
-  if(inSession()&&!feedFresh()){
-    // 交易时段但行情停更（接口冻结/卡死），本轮不跑信号，避免拿冻结快照误触发
-    hideLowUp();
-  }else{
-    checkAlerts();
-    refreshReentryAllowed();
-    checkBreakout();
-    checkBreakoutPM();
-    checkReversal();
-    checkUs();
-    checkLowUp();   // 低开高走早期信号（9:30-9:40 第一/第二根），此前定义了却没接入
-  }
+  checkAlerts();
+  refreshReentryAllowed();
+  checkBreakout();
+  checkBreakoutPM();
+  checkReversal();
+  checkUs();
+  hideLowUp();
   var meta=document.getElementById('meta');
   if(meta){ meta.textContent='最近交易日 '+(S.m5[codes[0]]?S.m5[codes[0]].day:'—')+' · 共 '+S.total+' 只 · '+srcLabel()+' · 刷新 '+S.lastTs; }
   var sigSub=document.getElementById('sig-page-sub');
@@ -2137,14 +2197,12 @@ var ALERT_COOLDOWN=180000; // 同一信号冷却 3 分钟，避免反复响
 var START_PCT=0.15;          // 启动翻红门槛(%)：现价对开盘刚翻红即捕捉
 var START_BODY=0.15;        // 最新一根实体阳线最小幅度(%)，剔除十字/横盘脉冲
 var RV_MIN=1.5;              // 放量门槛：最新根量比 ≥1.5；量比取不到不兜底放行
-var TRIGGER_LOOKBACK=4;      // 触发根回看窗口：最近4根内的放量阳线都能识别，不再只看最新根
 var BREAKOUT_CONS=0.05;      // 成分加权共振门槛(%)
 var BREAKOUT_PULLBACK=0.99;  // 现价/盘中最低回落底线：现价不得低于最高的99%，防冲高回落
 var BREAKOUT_UNTIL=600;      // 早期窗口截止 10:00（9:30=570）
 var PM_UNTIL=890;            // 下午/反转窗口截止 14:50
 var BREAKOUT_COOLDOWN=60000; // 启动信号冷却 1 分钟，同一票不重复报
-var STALE_KLINE_GAP=3;        // 窗口内最新1分K根落后当前分钟超过该值，判定行情停更
-var MAX_TRIG_AGE=15;          // 触发根年龄上限：ready根超过15分钟仍未confirm，低价窗口已过，置chase放弃
+var HOLD_SECONDS=15;          // 实时确认：现价在触发价上方撑住 15 秒才确认（对齐云端 gate_eval）
 var FAIL_BUFFER=0.1;         // 轻微回踩缓冲：下一根只低0.1%内不算破位（对齐云端）
 var MAX_RESET=2;             // fail二次启动最多解锁次数（对齐云端）
 var MAX_REENTRY=1;           // 破止损后重新启动最多1次（对齐云端）
@@ -2168,18 +2226,10 @@ var INDEX_WEAK_PCT=-1.0;
 var CRASH_PCT=-3.0;           // 跌超3%判暴跌硬熔断：所有信号（含下午单）全停，30天5526样本暴跌安全率仅4%
 var WEAK_PM_W=0.2;
 // 低开反转信号（坑里反转，逆势单）
-// 方案B 坑反弹：贴坑底企稳埋伏（回测胜率68.8%）
-var REV_BOX_N=8;               // 兼容旧引用
-var REV_LOW_BACK=5;
-var REV_STOP=0.4;              // 固定止损 -0.4%（基于进场价）
-var REV_TAKE=0.6;              // 止盈 +0.6%
-var REV_NEAR=0.4;              // 进场收盘贴坑底：距坑底≤0.4%
-var REV_AGE_LO=5;              // 坑底根龄窗口（9:35-9:45）
-var REV_AGE_HI=15;
-var REV_DEPTH=2.0;             // 或当日坑深≥2%
-var REV_REGIME_THRESH=45;      // 普跌日环境开关阈值
-var REV_NL_TOL=0.15;           // 现价贴当日最低容差
-// 坑反弹确认门槛（逆势，弱市也要抓；比顺势宽松但仍防接飞刀）
+var REV_BOX_N=8;               // 底部盘整区间回看根数
+var REV_LOW_BACK=5;            // 当日最低至少在 N 根之前，确认企稳不再创新低
+var REV_STOP=0.35;             // 坑反弹止损-0.35%：回测留住70%会涨的票、截住76%会跌的票
+// 低开反转确认门槛（逆势，弱市也要能抓坑反弹；比顺势宽松但仍防接飞刀）
 var REV_RED_MIN=0.4;           // 成分股红率门槛（顺势为 0.6）
 var REV_W_NORMAL=0.0;          // 正常市：成分加权 w 需为正
 var REV_W_WEAK=-0.5;           // 弱市：允许成分股小跌，但不能深度暴跌
@@ -2207,43 +2257,18 @@ function updateConfirm(seenObj, list){
 var LOWUP_GAP=-0.05;          // 低开门槛(%)：开盘低于昨收
 var LOWUP_UP=0.05;            // 高走门槛(%)：现价高于开盘
 var LOWUP_CONS=0.05;          // 成分加权红门槛(%)
-var LOWUP_B2_END=580;         // 第二根5分K结束(9:40)，过后不再推早期信号（对齐云端）
 var LOWUP_COOLDOWN=60000;     // 同一票冷却 1 分钟
 function hideLowUp(){ var b=document.getElementById('lowup-bar'); if(b) b.style.display='none'; }
-// 当前所在5分根（早盘前两根）：优先用 m1 实时聚合（对齐云端 m5_current_agg），回退 m5 最新根
-function lowupCurRoot(code,t){
-  var gNow=Math.floor((t-570)/5), m1=S.m1[code], openO=null, members=[];
-  if(m1&&m1.bars){
-    for(var k=0;k<m1.bars.length;k++){
-      var b=m1.bars[k];
-      var bm=(+b[0].slice(-4,-2))*60+(+b[0].slice(-2));
-      var g=bm>=570?Math.floor((bm-570)/5):-1;
-      if(g!==gNow||bm>t) continue;
-      if(openO===null) openO=+b[1];
-      members.push(+b[2]);
-    }
-  }
-  if(openO!==null&&members.length){
-    var cc=members[members.length-1];
-    return {idx:gNow,body:(cc/openO-1)*100};
-  }
-  var set=S.m5[code]||S.minute[code], lb=lastBar(set), body=lb?barSelf(lb):null;
-  return body===null?null:{idx:gNow,body:body};
-}
 function checkLowUp(){
-  var d=new Date(), t=d.getHours()*60+d.getMinutes();
-  // 仅开盘最早两根5分K（9:30-9:40）；窗口外/午休一律隐藏，不补推
-  if(t<570||t>=LOWUP_B2_END){ hideLowUp(); return; }
+  if(!inSession()){ hideLowUp(); return; }
   var vis=visibleEtfs(), best=null;
   for(var i=0;i<vis.length;i++){
     var code=vis[i].code, q=S.quotes[code];
     if(!q||!(q.now>0)) continue;
     var f=lowupFlags({code:code});
-    if(!f||!f.low||!f.up) continue;   // 低开+高走即可，不强制成分共振（tier2/3都算）
-    var root=lowupCurRoot(code,t);
-    if(!root||root.body===null||root.body<=0) continue;  // 当前5分根需实体阳线
+    if(!f||f.tier!==3) continue;
     var score=f.rt+(f.w!=null?f.w:0)*0.5;
-    if(!best||score>best.score) best={code:code,name:q.name,gap:f.gap,rt:f.rt,w:f.w,idx:root.id,body:root.body,score:score};
+    if(!best||score>best.score) best={code:code,name:q.name,gap:f.gap,rt:f.rt,w:f.w,score:score};
   }
   var bar=document.getElementById('lowup-bar');
   if(!best){ hideLowUp(); return; }
@@ -2252,10 +2277,8 @@ function checkLowUp(){
     S.lowupAlerted[best.code]=now+LOWUP_COOLDOWN;
     beep();
     if(bar){
-      var rootTxt=best.idx===0?'第一根':'第二根';
-      var wTxt=best.w!=null?fmtPct(best.w):'暂缺';
       bar.style.display='';
-      bar.textContent='低开高走·'+rootTxt+' 第一名：'+esc(best.name)+'  低开 '+fmtPct(best.gap)+' · 对开盘 '+fmtPct(best.rt)+' · 当前根实体 '+fmtPct(best.body)+' · 成分加权 '+wTxt;
+      bar.textContent='低开高走 · 第一名：'+esc(best.name)+'  低开 '+fmtPct(best.gap)+' · 对开盘 '+fmtPct(best.rt)+' · 成分加权 '+fmtPct(best.w);
     }
   }
 }
@@ -2272,29 +2295,6 @@ function latestRv(m){
   if(!base){ var s=0,n=0; for(var j=Math.max(0,vol.length-20);j<vol.length;j++){ s+=vol[j]||0; n++; } base=n>0?s/n:0; }
   return base>0?+(v/base).toFixed(2):null;
 }
-// 任意根 i 的量比：该根量 / 它之前19根均量（与服务端 bar_rv 口径一致）
-function barRvAt(bars, i){
-  var vols=bars.map(function(b){return +b[5]||0;}), s=0,n=0;
-  for(var j=Math.max(0,i-19);j<i;j++){ s+=vols[j]; n++; }
-  var base=n>0?s/n:0;
-  return base>0?vols[i]/base:null;
-}
-// 顺势触发根：在最近 TRIGGER_LOOKBACK 根里从新往回找放量阳线，返回 {lb,body,rv}，否则 null
-function breakoutTrigger(q, m){
-  if(!q||!m||!m.bars) return null;
-  var bars=m.bars, startI=Math.max(0,bars.length-TRIGGER_LOOKBACK);
-  for(var i=bars.length-1;i>=startI;i--){
-    var b=bars[i], o=+b[1], c=+b[2];
-    if(!(o>0)) continue;
-    var body=(c/o-1)*100;
-    if(body<START_BODY) continue;
-    if(!(+b[5]>0)) continue;
-    var rv=barRvAt(bars,i);
-    if(rv!=null&&rv<RV_MIN) continue;
-    return {lb:b, body:body, rv:rv};
-  }
-  return null;
-}
 function pickBrk(best,cand){
   if(!best) return cand;
   if(best.pending&&!cand.pending) return cand;
@@ -2309,18 +2309,24 @@ function checkBreakout(){
     renderBreakoutIdle('暴跌熔断','大盘跌超 3%，所有信号全停（不接飞刀）；等大盘企稳');
     return;
   }
-  // 弱市不观望：9:30-10:00 每一分钟都照常扫描确认（与正常市一致），仅暴跌硬熔断才停
+  if(isWeak()){
+    renderBreakoutIdle('弱市观望','大盘跌超 1%，早盘不逆势抄底；等大盘企稳，或 10:00 后只做强共振');
+    return;
+  }
   var vis=visibleEtfs(), cands={};
   for(var i=0;i<vis.length;i++){
     var code=vis[i].code, q=S.quotes[code];
-    if(US_CODES[code]) continue; // 美股QDII走专用坑底逻辑，不进顺势/反转票池（对齐服务端）；商品票保留，走商品专用门槛
     if(!q||!(q.now>0)) continue;
     var m=S.m1[code]||S.m5[code]||S.minute[code];
     var lift=q.rt;
     if(lift==null||lift<START_PCT) continue;
-    var tr=breakoutTrigger(q,m);   // 回看最近4根找放量阳线触发根，不再只看最新根
-    if(!tr) continue;
-    var lb=tr.lb, rv=tr.rv;
+    var lb=m?lastBar(m):null;
+    var body=lb?(+lb[2]/+lb[1]-1)*100:null;
+    if(body==null||body<START_BODY) continue;
+    var lbVol=lb?(+lb[5]||0):0;
+    if(lbVol<=0) continue;
+    var rv=latestRv(m);
+    if(rv!=null&&rv<RV_MIN) continue;
     var hi=q.high;
     var pullBack=(hi>0&&q.now>0)?q.now/hi:null;
     if(pullBack!=null&&pullBack<BREAKOUT_PULLBACK) continue;
@@ -2424,8 +2430,8 @@ function gateEvalOne(stateObj, code, cand, requireRed){
   }
   return st;
 }
-// 触发即推（对齐云端 gate_eval）：放量阳线触发根已收盘、实时价仍在触发价上方且当轮门槛达标即confirm，不再等待；
-// 现价已涨完一个目标空间则置 chase 放弃；下一根已走完且收盘破位则 fail。requireRed 时还要红率≥60% + 成分加权（弱市更严）。
+// 实时确认（对齐云端 gate_eval）：现价在触发价上方撑住 HOLD_SECONDS 即确认，不等下一根走完；
+// 下一根已走完且收盘破位则 fail。requireRed 时还要红率≥60% + 成分加权（弱市更严）。
 // 已confirm的票若现价跌破对应止损线，标记允许重新启动（与后端 track_positions 标记 stopped 对应）
 function refreshReentryAllowed(){
   var boxes=[{box:amState,coef:QUICK_STOP},{box:pmState,coef:QUICK_STOP},{box:revState,coef:REV_STOP}];
@@ -2456,14 +2462,14 @@ function gateLive(stateObj, code, cand, requireRed, isRev){
   if(!st){
     if(!cand||!cand.lb) return null;
     st=stateObj[code]={trigBt:cand.lb[0], trigPrice:+cand.lb[2], phase:'ready',
-      gap:cand.gap, low:cand.low, score:cand.score, lift:cand.lift};
+      gap:cand.gap, low:cand.low, score:cand.score, lift:cand.lift, holdSince:null};
   }
   if(st.phase==='confirm'){
     // 破止损后重新启动：已跌破止损 + 重新放量(cand)创新高 + 未超上限 -> 重置重来
     var rec=st.reentryCount||0;
     if(cand&&cand.lb&&REENTRY_ALLOWED[code]&&rec<MAX_REENTRY&&(+cand.lb[2]>st.trigPrice)){
       st.trigBt=cand.lb[0]; st.trigPrice=+cand.lb[2]; st.phase='ready';
-      st.score=cand.score; st.lift=cand.lift;
+      st.score=cand.score; st.lift=cand.lift; st.holdSince=null;
       st.reentryCount=rec+1; st.failReason=null;
     }else return st;
   }
@@ -2472,22 +2478,9 @@ function gateLive(stateObj, code, cand, requireRed, isRev){
     var rc=st.resetCount||0;
     if(cand&&cand.lb&&rc<MAX_RESET&&(+cand.lb[2]>st.trigPrice)){
       st.trigBt=cand.lb[0]; st.trigPrice=+cand.lb[2]; st.phase='ready';
-      st.score=cand.score; st.lift=cand.lift;
+      st.score=cand.score; st.lift=cand.lift; st.holdSince=null;
       st.resetCount=rc+1; st.failReason=null;
     }else return st;
-  }
-  if(st.phase==='chase'){
-    // 过期/追高放弃的单当天锁定，不再重新评估
-    return st;
-  }
-  // 触发根年龄上限：ready根太老仍未confirm，低价窗口已过，置chase放弃（对齐云端）
-  var tb=String(st.trigBt);
-  if(tb.length>=12){
-    var trigMinCur=(+tb.substr(8,2))*60+(+tb.substr(10,2));
-    var nowMinCur=new Date().getHours()*60+new Date().getMinutes();
-    if(nowMinCur-trigMinCur>MAX_TRIG_AGE){
-      st.phase='chase'; st.failReason='触发根陈旧，低价错过'; return st;
-    }
   }
   var nowPrice=q?q.now:null;
   var stand=(nowPrice!=null&&nowPrice>=st.trigPrice);
@@ -2532,15 +2525,13 @@ function gateLive(stateObj, code, cand, requireRed, isRev){
   var ti=-1;
   for(var j=0;j<bars.length;j++){ if(bars[j][0]===st.trigBt){ti=j;break;} }
   var hasNext=(ti>=0&&ti+1<bars.length), nxt=hasNext?bars[ti+1]:null;
+  var nowSec=Date.now()/1000;
   if(stand){
-    // 触发即推：放量阳线触发根已收盘，实时价仍在触发价上方、当轮红率/加权/量比达标即confirm，不再等待，抢低价
+    if(st.holdSince==null) st.holdSince=nowSec;
+    var held=nowSec-st.holdSince;
     var rvNow=latestBarRv(bars);
     var pmRvOk=(!requireRed||isRev||rvNow==null||rvNow>=PM_RV_MIN);
-    if(redOk&&wReady&&wGate&&pmRvOk){
-      // 过期保护：现价相对触发价已涨完一个完整目标空间，说明触发根被延迟发现、低价已错过，追高放弃
-      var takePct=isRev?(US_CODES[code]?US_TAKE:REV_TAKE):(requireRed?QUICK_TAKE:AM_TARGET);
-      var chase=Math.round((nowPrice/st.trigPrice-1)*100*10000)/10000;
-      if(chase>=takePct){ st.phase='chase'; return st; }
+    if(held>=HOLD_SECONDS&&redOk&&wReady&&wGate&&pmRvOk){
       st.phase='confirm'; st.confirmBt=(cand&&cand.lb)?cand.lb[0]:st.trigBt; st.confirmTs=Date.now();
       return st;
     }
@@ -2550,6 +2541,7 @@ function gateLive(stateObj, code, cand, requireRed, isRev){
     }
     return st;
   }
+  st.holdSince=null;
   if(hasNext&&(+nxt[2]<st.trigPrice)){
     var dropPct=((+nxt[2]/st.trigPrice)-1)*100;
     if(dropPct<-FAIL_BUFFER){ st.phase='fail'; st.failReason='下一根破位'; }
@@ -2570,14 +2562,17 @@ function checkBreakoutPM(){
   var vis=visibleEtfs(), cands={};
   for(var i=0;i<vis.length;i++){
     var code=vis[i].code, q=S.quotes[code];
-    if(US_CODES[code]) continue; // 美股QDII走专用坑底逻辑，不进顺势/反转票池（对齐服务端）；商品票保留，走商品专用门槛
     if(!q||!(q.now>0)) continue;
     var m=S.m1[code]||S.m5[code]||S.minute[code];
     var lift=q.rt;
     if(lift==null||lift<START_PCT) continue;
-    var trig=breakoutTrigger(q,m);
-    if(!trig) continue;
-    var lb=trig.lb, body=trig.body, rv=trig.rv;
+    var lb=m?lastBar(m):null;
+    var body=lb?(+lb[2]/+lb[1]-1)*100:null;
+    if(body==null||body<START_BODY) continue;
+    var lbVol=lb?(+lb[5]||0):0;
+    if(lbVol<=0) continue;
+    var rv=latestRv(m);
+    if(rv!=null&&rv<RV_MIN) continue;
     var hi=q.high;
     var pullBack=(hi>0&&q.now>0)?q.now/hi:null;
     if(pullBack!=null&&pullBack<BREAKOUT_PULLBACK) continue;
@@ -2612,13 +2607,9 @@ function checkBreakoutPM(){
     if(st.phase==='confirm'){
       var takeLo=+(st.trigPrice*(1+QUICK_TAKE/100)).toFixed(3);
       var stopPx=+(st.trigPrice*(1-QUICK_STOP/100)).toFixed(3);
-      var nowPx=q?q.now:null, stateTag='确认买入', stateCls='confirm', liveTip='';
-      if(nowPx!=null&&nowPx>=takeLo){ stateTag='已到目标'; liveTip='现价已到目标，止盈走人'; }
-      else if(nowPx!=null&&nowPx<=stopPx){ stateTag='已破止损'; stateCls='pm-fail'; liveTip='现价已破止损，立刻卖'; }
-      return '<div class="brk-item pm-confirm"><span class="brk-tag '+stateCls+'">'+stateTag+'</span> '+esc(q?q.name:code)+
+      return '<div class="brk-item pm-confirm"><span class="brk-tag confirm">确认买入</span> '+esc(q?q.name:code)+
         ' · 红率 '+(st.redRate!=null?Math.round(st.redRate*100)+'%':'—')+
         ' · 快进快出：到 <b>'+takeLo+'（+0.2%）</b>就走，跌破 '+stopPx+' 立刻止损'+
-        (liveTip?' · '+liveTip:'')+
         ' <span class="copy-btn" data-copy="'+code+'">复制代码</span></div>';
     }
     var tag=(cd&&cd.low)?'低开拉升':'高开拉升';
@@ -2636,29 +2627,31 @@ function checkBreakoutPM(){
 }
 // 低开反转候选（坑里）：低开、现价仍低于开盘，底部企稳后放量突破盘整区间
 function reversalCand(q, m){
-  if(!q||!m||!m.bars||m.bars.length<10) return null;
+  if(!q||!m||!m.bars||m.bars.length<21) return null;
   var gap=q.gap;
-  if(gap==null) return null;
+  if(gap==null) return null;                       // 低开、高开都可，关键是后面仍在坑里
   var openPx=q.open;
   if(!openPx||openPx<=0||q.now==null||q.now>=openPx) return null;  // 现价仍在坑里
-  var bars=m.bars, vols=bars.map(function(b){return +b[5]||0;});
-  var startI=Math.max(0,bars.length-TRIGGER_LOOKBACK);
-  for(var i=bars.length-1;i>=startI;i--){
-    var lb=bars[i], o=+lb[1], c=+lb[2];
-    if(isNaN(o)||o<=0||c<=0) continue;
-    var segLows=bars.slice(0,i+1).map(function(b){return +b[4];});
-    var pit=Math.min.apply(null,segLows);
-    var li=segLows.length-1;
-    while(li>=0&&segLows[li]!==pit) li--;
-    var age=i-li, depth=(openPx/pit-1)*100;
-    if(!(REV_AGE_LO<=age&&age<REV_AGE_HI||depth>=REV_DEPTH)) continue;  // 个股过滤
-    if((c/pit-1)*100>REV_NEAR) continue;                                // 贴坑底
-    if(vols[i]<=0) continue;                                           // 缩量允许但要有量
-    var rv=barRvAt(bars,i);
-    var lift=(c/openPx-1)*100, score=(rv||1)+depth*0.5;
-    return {code:q.code,name:q.name,gap:gap,low:gap<0,lift:lift,rv:rv,score:score,w:null,lb:lb};
-  }
-  return null;
+  var bars=m.bars, lb=bars[bars.length-1];
+  var o=+lb[1], c=+lb[2];
+  if(isNaN(o)||o<=0||c<o) return null;            // 最新根收阳
+  var lows=bars.map(function(b){return +b[4];});
+  var highs=bars.map(function(b){return +b[3];});
+  var dayLow=Math.min.apply(null,lows);
+  // 底部企稳：最近 N 根不再创新低，且当日最低至少在 REV_LOW_BACK 根前
+  if(Math.min.apply(null,lows.slice(-REV_BOX_N))<dayLow) return null;
+  var li=-1;
+  for(var j=lows.length-1;j>=0;j--){ if(lows[j]===dayLow){li=j;break;} }
+  if(lows.length-1-li<REV_LOW_BACK) return null;
+  // 放量：量比 >=1.5
+  var rv=latestRv(m);
+  if(rv==null||rv<RV_MIN) return null;
+  // 突破：收盘 > 前 N 根盘整区间最高
+  var boxHi=Math.max.apply(null, highs.slice(-(REV_BOX_N+1),-1));
+  if(c<=boxHi) return null;
+  var lift=(c/openPx-1)*100;
+  var score=(rv||1)+(-lift)*0.5;                  // 逆势：反弹力度越大分越高
+  return {code:q.code,name:q.name,gap:gap,low:gap<0,lift:lift,rv:rv,score:score,w:null,lb:lb};
 }
 function hideReversal(){ var b=document.getElementById('breakout-rev'); if(b) b.style.display='none'; }
 function revCard(right, bodyHtml){ var b=document.getElementById('breakout-rev'); if(!b) return; b.style.display='block'; b.innerHTML='<div class="brk-head"><span class="brk-title" style="color:#EA6668">坑反弹 · 从坑反弹</span><span class="brk-state">'+right+'</span></div>'+bodyHtml; }
@@ -2673,12 +2666,10 @@ function checkReversal(){
   }
   if(t>PM_UNTIL){ renderRevIdle('已结束','今日反转窗口已结束（14:50 前有效）'); return; }
   if(isCrash()){ renderRevIdle('暴跌熔断','大盘跌超 3%，所有信号全停（不接飞刀）；等大盘企稳再看'); return; }
-  if(revRegimeBlocked()){ renderRevIdle('普跌关闭','开盘大面积同步创新低，坑反弹今日整体关闭（不接飞刀）'); return; }
-  if(isWeak()){ /* 弱市照常做，用户拍板 */ }
+  if(isWeak()){ renderRevIdle('弱市观望','大盘跌超 1%，坑反弹暂停（不接飞刀）；等大盘企稳再看'); return; }
   var vis=visibleEtfs(), cands={};
   for(var i=0;i<vis.length;i++){
     var code=vis[i].code, q=S.quotes[code];
-    if(US_CODES[code]) continue; // 美股QDII走专用坑底逻辑，不进顺势/反转票池（对齐服务端）；商品票保留，走商品专用门槛
     if(!q||!(q.now>0)) continue;
     var m=S.m1[code]||S.m5[code]||S.minute[code];
     var rc=reversalCand(q,m);
@@ -2703,15 +2694,11 @@ function checkReversal(){
   function view(code){
     var st=revState[code], q=S.quotes[code], cd=cands[code];
     if(st.phase==='confirm'){
-      var trig=+st.trigPrice;
-      var takePx=+(trig*(1+REV_TAKE/100)).toFixed(3);
-      var stopPx=+(trig*(1-REV_STOP/100)).toFixed(3);
-      var nowTxt=q?(''+q.now):'—';
+      var stopPx=+(st.trigPrice*(1-REV_STOP/100)).toFixed(3);
+      var openTxt=q?(''+q.open):'—';
       return '<div class="brk-item pm-confirm"><span class="brk-tag confirm">确认买入</span> '+esc(q?q.name:code)+
         ' · 红率 '+(st.redRate!=null?Math.round(st.redRate*100)+'%':'—')+
-        '<div style="margin-top:6px;line-height:1.7;font-size:14px;">'+
-        '触发价 <b>'+trig+'</b>　当前价 <b>'+nowTxt+'</b><br>'+
-        '止盈价 <b style="color:#EA6668">'+takePx+'</b>（+0.6%）　止损价 <b style="color:#059669">'+stopPx+'</b>（-0.4%）</div>'+
+        ' · 从坑反弹：先看开盘价 <b>'+openTxt+'</b>，跌破 '+stopPx+' 立刻止损'+
         ' <span class="copy-btn" data-copy="'+code+'">复制代码</span></div>';
     }
     return '<div class="brk-item"><span class="brk-tag blue">低开反转</span><span class="brk-tag ready">预备</span> '+esc(q?q.name:code)+
@@ -2803,27 +2790,9 @@ function checkUs(){
 }
 function inSession(){
   var d=new Date(), t=d.getHours()*60+d.getMinutes();
-  // 全部为 A 股上市 ETF，按 A 股时段：9:30-11:30、13:00-15:00；午休 11:30-13:00 不扫描
-  if(t>=570&&t<690) return true;    // 9:30-11:29
-  if(t>=780&&t<900) return true;    // 13:00-14:59
+  if(t>=570&&t<=720) return true;   // 9:30-12:00
+  if(t>=780&&t<=960) return true;   // 13:00-16:00
   return false;
-}
-function feedFresh(){
-  // 窗口内行情是否实时：抽样活跃票，看最新1分K根时间是否贴近当前。
-  // 接口冻结时K线停更，最新根明显落后，据此拦截，不拿冻结快照误触发信号。
-  var d=new Date(), now=d.getHours()*60+d.getMinutes();
-  var vis=visibleEtfs(), fresh=0, checked=0;
-  for(var i=0;i<Math.min(8,vis.length);i++){
-    var code=vis[i].code, m=S.m1[code]||S.m5[code]||S.minute[code];
-    if(!m||!m.bars||!m.bars.length) continue;
-    var bt=''+m.bars[m.bars.length-1][0];
-    if(bt.length<12) continue;
-    var hm=bt.slice(-4), barMin=+hm.slice(0,2)*60+ +hm.slice(2);
-    checked++;
-    if(now-barMin<=STALE_KLINE_GAP) fresh++;
-  }
-  if(!checked) return false;  // 取不到K线，不冒险推送
-  return fresh*2>=checked;
 }
 function checkAlerts(){
   if(!S.alertThr) return;
