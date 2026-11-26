@@ -289,6 +289,13 @@ def is_hk_down_env():
     return is_weak() or is_pullback()
 
 
+def hk_index_tied(code):
+    """该票是否跟踪港股指数、受大盘走弱/回落开关约束。
+    商品期货 ETF（159980/159981/159985）走各自期货合约行情，美股 QDII 走隔夜美股，
+    均不跟随恒指/恒科，大盘开关不对其生效。"""
+    return code not in COMMODITY_CODES and code not in US_CODES
+
+
 def rev_regime_blocked(doc, quotes):
     """方案B 市场环境开关：9:35 后统计“现价贴着当日最低且在跌”的票占比，
     ≥REV_REGIME_THRESH 判定为系统性普跌日，当天坑反弹整体关闭，结果按日期缓存。"""
@@ -1029,15 +1036,16 @@ def push_pm(doc, quotes, states):
         print('暴跌硬熔断，下午信号全部暂停（不新开，等大盘企稳）')
         doc['fired_pm'] = sorted(set(doc['fired_pm']))
         return []
-    if is_hk_down_env():
-        print('大盘走弱/回落段（weak/回落 ≥%.1f%%），下午顺势信号暂停（指数未止跌，ETF 跟随下滑基本不达标）' % abs(HIGH_PULL_PCT))
-        doc['fired_pm'] = sorted(set(doc['fired_pm']))
-        return []
+    hk_blocked = is_hk_down_env()
+    if hk_blocked:
+        print('大盘走弱/回落段（weak/回落 ≥%.1f%%），港股顺势信号暂停；商品期货走自身行情照常' % abs(HIGH_PULL_PCT))
     # 当日已推过的票（含早盘）不重复推，避免覆盖早盘持仓记录；仅破止损后的合法重进例外
     fired = set(doc['fired_pm']) | set(doc.get('fired_am', []))
     new = []
     for code, s in states.items():
         if s.get('phase') != 'confirm':
+            continue
+        if hk_blocked and hk_index_tied(code):
             continue
         is_reentry = s.get('reentry_count', 0) > 0
         pos_p = doc.get('position', {}).get(code)
@@ -1088,16 +1096,17 @@ def push_rev(doc, quotes, states):
     if is_crash():
         print('暴跌硬熔断，坑反弹暂停（不接飞刀，等大盘企稳）')
         return []
-    if is_hk_down_env():
-        print('大盘走弱/回落段，坑反弹暂停（指数未止跌，不接飞刀，等拉升回来）@%d' % now_min())
-        return []
+    hk_blocked = is_hk_down_env()
+    if hk_blocked:
+        print('大盘走弱/回落段，港股坑反弹暂停；商品期货走自身行情照常 @%d' % now_min())
     if rev_regime_blocked(doc, quotes):
         print('普跌日，坑反弹整体关闭 @%d' % now_min())
         return []
     fired = set(doc['fired_rev'])
     already = set(doc['fired_am']) | set(doc['fired_pm']) | fired
     conf = [(c, states[c]) for c in states
-            if states[c].get('phase') == 'confirm' and c not in already]
+            if states[c].get('phase') == 'confirm' and c not in already
+            and not (hk_blocked and hk_index_tied(c))]
     if not conf:
         doc['fired_rev'] = sorted(fired)
         return []
@@ -1148,17 +1157,18 @@ def push_sb(doc, quotes, states):
         print('暴跌硬熔断，二次探底信号暂停（不接飞刀）')
         doc['fired_sb'] = sorted(set(doc.get('fired_sb', [])))
         return []
-    if is_hk_down_env():
-        # 回测：普跌环境 W 底达标率仅 3.8%、止损率 92%；回落段指数未止跌，双底易破，默认不推
-        print('大盘走弱/回落段，二次探底暂停（不接飞刀，等指数止跌拉升）@%d' % now_min())
-        doc['fired_sb'] = sorted(set(doc.get('fired_sb', [])))
-        return []
+    hk_blocked = is_hk_down_env()
+    if hk_blocked:
+        # 回测：普跌环境 W 底达标率仅 3.8%、止损率 92%；回落段指数未止跌，双底易破，港股默认不推；商品期货照常
+        print('大盘走弱/回落段，港股二次探底暂停；商品期货走自身行情照常 @%d' % now_min())
     already = (set(doc['fired_am']) | set(doc['fired_pm'])
                | set(doc['fired_rev']) | set(doc['fired_us']))
     fired = set(doc.get('fired_sb', []))
     new = []
     for code, s in states.items():
         if s.get('phase') != 'confirm' or code in fired or code in already:
+            continue
+        if hk_blocked and hk_index_tied(code):
             continue
         qt = quotes.get(code)
         lv = entry_levels(s, qt, SB_TAKE, SB_STOP)
