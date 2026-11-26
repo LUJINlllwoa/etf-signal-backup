@@ -1422,6 +1422,13 @@ def in_window(t):
 
 
 def loop_forever():
+    # 单实例锁：任何来源（系统托管/兜底 supervisord/手动）重复拉起第二个 --loop 时直接退出，防双开重复推送
+    loop_lock = open('scan_pm.loop.lock', 'w')
+    try:
+        fcntl.flock(loop_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print('已有 scan_pm --loop 常驻在跑，本实例退出（防双开）', flush=True)
+        return
     # supervisord 停服时发 SIGTERM，转成异常走 finally 清理 pid
     signal.signal(signal.SIGTERM, _sigterm)
     with open('scan_pm.pid', 'w') as f:
