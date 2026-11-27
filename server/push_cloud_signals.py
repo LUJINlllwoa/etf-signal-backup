@@ -87,9 +87,13 @@ def from_perf(rows, nm, m6):
     return out
 
 
-def from_position(state, day_signals, nm):
-    """盘中兜底：position 为主，day_signals 台账补全未覆盖项。"""
-    pos = state.get('position', {}) if isinstance(state, dict) else {}
+def from_position(state, day_signals, nm, state_today, day_today):
+    """盘中兜底：position 为主，day_signals 台账补全未覆盖项。
+
+    仅当日台账才取用：跨日开盘后、今日尚未出信号时，昨日残留不得带入云端。
+    """
+    pos = state.get('position', {}) if (isinstance(state, dict) and state_today) else {}
+    day_list = day_signals if day_today else []
     out, seen = [], set()
     for code, p in pos.items():
         key = code + p.get('kind', '')
@@ -104,7 +108,7 @@ def from_position(state, day_signals, nm):
             'dip_pct': None, 'status': p.get('status', 'holding'),
             'source': 'live',
         })
-    for p in (day_signals or []):
+    for p in (day_list or []):
         code = p.get('code', '')
         key = code + p.get('kind', '')
         if key in seen:
@@ -136,6 +140,12 @@ def main():
     day = _load_json(day_f, {})
     day_signals = day.get('signals', []) if isinstance(day, dict) else []
 
+    # 台账日期是否为今日（兼容 2026-11-26 / 20261126 两种写法）
+    def _is_today(v):
+        return bool(v) and str(v).replace('-', '') == date
+    state_today = _is_today(state.get('date')) if isinstance(state, dict) else False
+    day_today = _is_today(day.get('date')) if isinstance(day, dict) else False
+
     mk = state.get('market', {}) if isinstance(state, dict) else {}
     market = {
         'state': mk.get('state', 'normal'),
@@ -151,15 +161,16 @@ def main():
         signals = from_perf(perf['rows'], nm, m6)
         summary = perf.get('summary', {})
         source = 'perf'
+        # 低开高走为收盘回算归档，仅收盘绩效阶段带出；盘中 live 不沿用历史残留
+        lowup = []
+        if os.path.exists(lowup_f):
+            raw = _load_json(lowup_f, [])
+            lowup = raw if isinstance(raw, list) else raw.get('rows', raw.get('records', []))
     else:
-        signals = from_position(state, day_signals, nm)
+        signals = from_position(state, day_signals, nm, state_today, day_today)
         summary = {'total': len(signals), 'signal_count': len(signals)}
         source = 'live'
-
-    lowup = []
-    if os.path.exists(lowup_f):
-        raw = _load_json(lowup_f, [])
-        lowup = raw if isinstance(raw, list) else raw.get('rows', raw.get('records', []))
+        lowup = []
 
     cloud = {
         'date': date,
