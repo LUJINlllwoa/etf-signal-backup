@@ -1,25 +1,25 @@
 {
   "date": "20261127",
-  "generated_at": "2026-11-27 14:33:08",
+  "generated_at": "2026-11-27 15:34:39",
   "schema": 2,
   "source": "live",
   "market": {
     "state": "normal",
     "pullback": false,
     "rebound": false,
-    "hsi": 1.9,
-    "hstech": 5.93,
-    "hsi_pull": -0.42,
-    "hstech_pull": -0.14,
+    "hsi": 1.75,
+    "hstech": 5.62,
+    "hsi_pull": -0.56,
+    "hstech_pull": -0.43,
     "pull_low": null,
     "tag": "正常"
   },
   "summary": {
-    "total": 146,
-    "signal_count": 146
+    "total": 147,
+    "signal_count": 147
   },
   "lowup_count": 0,
-  "signal_count": 146,
+  "signal_count": 147,
   "lowup": [],
   "signals": [
     {
@@ -1406,6 +1406,24 @@
       "cl_pct": null,
       "dip_pct": null,
       "status": "stopped",
+      "source": "live"
+    },
+    {
+      "code": "sh513240",
+      "code6": "513240",
+      "name": "港股通信息技术ETF华安",
+      "kind": "二次探底",
+      "time": "14:43",
+      "trig": 0.765,
+      "entry": 0.765,
+      "target": 0.77,
+      "stop": 0.762,
+      "high": null,
+      "close": null,
+      "hi_pct": null,
+      "cl_pct": null,
+      "dip_pct": null,
+      "status": "miss",
       "source": "live"
     },
     {
